@@ -8,6 +8,7 @@ services:
       DATABASE_DSN: /app/data/infinite-canvas.db
       MUSE2API_BASE_URL: http://muse2api:18610/v1
       MUSE2API_KEY: ${MUSE2API_KEY:?请设置 MUSE2API_KEY}
+      MUSE_ACCOUNT_IMPORTER_ID: ${MUSE_ACCOUNT_IMPORTER_ID:-}
     volumes:
       - canvas-data:/app/data
     ports:

@@ -16,7 +16,7 @@ export type CodexModel = {
 };
 export function normalizeCodexEndpoint(endpoint: string) {
     try {
-        const url = new URL(endpoint);
+        const url = new URL(endpoint.trim() || "http://127.0.0.1:3210");
         if (url.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(url.hostname) || url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error();
         return url.origin;
     } catch { throw new Error("本地 Agent 地址必须为 http://127.0.0.1:端口"); }

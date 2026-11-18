@@ -11,9 +11,9 @@ const CONTENT_PREFIX = /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/
 const VIDEO_PREFIX = /^data:video\/mp4;base64,[A-Za-z0-9+/]+=*$/;
 const VIDEO_DURATIONS = new Set([5, 6, 8, 10]);
 
-async function authorize(request: Request) {
+async function authorize(request: Request, action: string) {
     const token = request.headers.get("authorization");
-    if (!token?.startsWith("Bearer ")) throw new StudioError("请先登录画布管理员账号", 401);
+    if (!token?.startsWith("Bearer ")) throw new StudioError("请先登录画布账号", 401);
     const base = (process.env.API_BASE_URL || "http://127.0.0.1:8080").replace(/\/+$/, "");
     const response = await fetch(`${base}/api/auth/me`, {
         headers: { Authorization: token },
@@ -22,9 +22,12 @@ async function authorize(request: Request) {
         cache: "no-store",
     });
     const session = await response.json().catch(() => null);
-    if (!response.ok || session?.code !== 0 || session?.data?.role !== "admin") {
-        throw new StudioError("当前账号没有 Muse 创作权限", 403);
+    if (response.ok && session?.code === 0) {
+        const user = session.data;
+        if (user?.role === "admin") return "admin";
+        if (action === "accounts" && user?.role === "user" && user.id && user.id === process.env.MUSE_ACCOUNT_IMPORTER_ID) return "importer";
     }
+    throw new StudioError(action === "accounts" ? "当前画布账号没有导入权限" : "当前账号没有 Muse 创作权限", 403);
 }
 
 function actionError(error: unknown) {
@@ -41,8 +44,8 @@ function mediaResponse(upstream: Response, allowed: string) {
 
 export async function POST(request: Request, { params }: Context) {
     try {
-        await authorize(request);
         const { action } = await params;
+        await authorize(request, action);
         if (action === "accounts") {
             if (!request.headers.get("content-type")?.startsWith("application/json")) throw new StudioError("请使用账号导入表单", 415);
             if (Number(request.headers.get("content-length")) > 65536) throw new StudioError("账号数据过长", 413);
@@ -90,8 +93,9 @@ export async function POST(request: Request, { params }: Context) {
 
 export async function GET(request: Request, { params }: Context) {
     try {
-        await authorize(request);
         const { action } = await params;
+        const access = await authorize(request, action);
+        if (action === "accounts" && access === "importer") return Response.json({ importOnly: true }, { headers: NO_STORE });
         const id = new URL(request.url).searchParams.get("id");
         const client = createMuseClient(process.env.MUSE2API_BASE_URL, process.env.MUSE2API_KEY);
         if (action === "video") return Response.json(await client.videoStatus(id), { headers: NO_STORE });

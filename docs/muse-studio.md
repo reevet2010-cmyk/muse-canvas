@@ -2,7 +2,7 @@
 
 基于 tigerowo/infinite-canvas v0.8.4。打开画布编辑器，登录管理员账号，从底部工具栏打开「Muse 创作」。
 
-首次使用时，在「Muse 创作」点击「Muse 账号管理（导入账号）」，或通过站点的 HTTPS 地址打开 `/muse-accounts`。登录画布管理员账号，在 Muse 官网登录自己的账号，将已导出的单行 Cookie 填入表单，点「导入账号」。账号列表仅显示备注、启用状态和会话字段是否齐全。登录画布和登录 Muse 是两个独立步骤。
+从画布首页顶部点击「导入 Muse 账号」。登录后会自动回到导入表单，粘贴自己 Muse 账号已导出的单行 Cookie，点「导入账号」。管理员也可查看账号摘要。要授权一个普通用户导入，在画布服务设置 `MUSE_ACCOUNT_IMPORTER_ID` 为该用户的画布 ID，该授权仅允许导入。
 
 - 「写脚本」生成文本节点。「生成分镜」生成图片节点。选中图片后用「生成视频」，会把图片作为首帧参考。
 - 选中已有视频，用「尾帧续接」，输入接下来的画面并设置段数（1–12）。每一段请求 10 秒，上一段成片的尾帧用作下一段的首帧。片段按顺序加入画布并连线。
@@ -16,6 +16,20 @@
 按住 Shift 依次点选 2–24 个有素材的视频节点，打开底部「镜头时间线」。拖动镜头或用上下箭头调整顺序，点名称和播放键可从该镜头开始连播。选择竖屏或横屏后，管理员可点「导出 MP4」下载成片。此操作由 FFmpeg 执行，无需 Muse 额度。导出支持合计 80 MB、总长 5 分钟，输出 720×1280 或 1280×720、30 fps，保留原声，比例不同时补黑边。关闭时间线会结束本次排序。
 
 ## 部署
+
+### Agent 的两种用法
+
+画布 Agent 的「配置 API」打开渠道与模型配置。使用自己的 OpenAI 或兼容服务时填写 Base URL、API Key 和可用文本模型，在 Agent 设置中选择 Chat Completions 或 Responses。
+
+要从本机 Codex 操作画布，在本地克隆本项目，进入 `canvas-agent` 后用 Node.js 22 或更高版本运行 `npm install`。使用实际的 HTTPS 站点源（包括端口）及本地绝对路径注册：
+
+```sh
+codex mcp add infinite-canvas --env CANVAS_AGENT_SITE=https://canvas.example.com -- node /absolute/path/to/canvas-agent/index.mjs mcp
+```
+
+在 HTTPS 画布的 Agent 面板点「用本机 Codex」，复制画布指令给新的 Codex 对话。首次调用 `open_canvas` 会按需启动本机桥接服务并在浏览器打开目标项目。若浏览器询问，仅为自己的画布站点允许访问本地网络。保持该标签页打开。地址栏中的连接片段会自动清除。API 模式和本机 Codex 分别使用各自配置的凭据。
+
+### Docker Compose
 
 在支持 Docker Compose 的主机上将 `ADMIN_PASSWORD`、`JWT_SECRET`、`MUSE2API_KEY` 写入部署环境（或未入库的 `.env`），使用独立强随机值。然后执行：
 

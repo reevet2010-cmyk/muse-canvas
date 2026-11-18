@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import express from "express";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -27,22 +28,49 @@ const origins = new Set(process.env.CANVAS_AGENT_ORIGINS?.split(",").map((value)
 const sessions = new Map();
 const methods = new Set(["model/list", "thread/start", "thread/resume", "thread/archive", "turn/start", "turn/interrupt", "bridge/stop"]);
 
-async function openCanvas() {
-    const target = URL.canParse(process.argv[3] || "") ? new URL(process.argv[3]) : null;
+async function openCanvas(address, browser, pairingToken, browserArgs = []) {
+    const target = URL.canParse(address || "") ? new URL(address) : null;
     if (!target || !["http:", "https:"].includes(target.protocol) || target.username || target.password || !/^\/canvas\/[^/]+\/?$/.test(target.pathname)) throw new Error("请提供实际画布的 HTTP(S) 地址");
-    const browser = process.argv[4];
     if (!["chrome", "edge", "firefox", "brave", "default"].includes(browser)) throw new Error("请指定原画布浏览器：chrome、edge、firefox、brave 或 default");
     const params = new URLSearchParams(target.hash.slice(1));
     params.set("agentUrl", endpoint);
-    params.set("agentToken", token);
+    params.set("agentToken", pairingToken);
     target.hash = params.toString();
     const { default: open, apps } = await import("open");
     try {
-        await open(target.href, { app: { name: browser === "default" ? apps.browser : apps[browser], arguments: process.argv.slice(5) } });
+        await open(target.href, browser === "default" ? {} : { app: { name: apps[browser], arguments: browserArgs } });
     } catch (error) {
         throw new Error("打开浏览器失败，请检查原浏览器、配置和启动权限" + (error.code ? "：" + error.code : ""));
     }
-    console.log("已请求浏览器打开原画布，等待 MCP 确认连接");
+}
+
+async function pairTrustedCanvas(address) {
+    const target = new URL(address);
+    if (target.protocol !== "https:" || target.origin !== process.env.CANVAS_AGENT_SITE || target.username || target.password || target.search || target.hash || !/^\/canvas\/[\w-]+\/?$/.test(target.pathname)) {
+        throw new Error("请从已配置的 HTTPS 画布站点复制 /canvas/项目ID 地址");
+    }
+    const check = async () => {
+        const response = await fetch(endpoint + "/config", { signal: AbortSignal.timeout(1500), redirect: "error" });
+        const info = await response.json();
+        const local = readConfig();
+        if (!response.ok || !local?.token || !local.serviceId || info.serviceId !== local.serviceId) throw new Error("本机端口已被其他服务使用");
+        return local.token;
+    };
+    let pairingToken;
+    try { pairingToken = await check(); }
+    catch (error) {
+        if (error.cause?.code !== "ECONNREFUSED") throw error;
+        const child = spawn(process.execPath, [entry], { detached: true, stdio: "ignore", windowsHide: true });
+        child.unref();
+        for (let i = 0; i < 30; i++) {
+            await new Promise(resolve => setTimeout(resolve, 200));
+            try { pairingToken = await check(); break; }
+            catch (e) { if (e.cause?.code !== "ECONNREFUSED") throw e; }
+        }
+        if (!pairingToken) throw new Error("本地 Canvas Agent 未能启动");
+    }
+    await openCanvas(target.href, process.env.CANVAS_AGENT_BROWSER || "default", pairingToken);
+    return target.pathname.split("/")[2];
 }
 
 function saveConfig() {
@@ -50,9 +78,9 @@ function saveConfig() {
     writeFileSync(configPath, JSON.stringify({ url: endpoint, port, token, serviceId, origins: [...origins] }, null, 2) + "\n", { mode: 0o600 });
 }
 
-function findSession(clientId) {
+function findSession(clientId, canvasId) {
     if (!clientId) {
-        const connected = [...sessions.values()].filter((session) => session.events && session.canvasId);
+        const connected = [...sessions.values()].filter((session) => session.events && session.canvasId && (!canvasId || session.canvasId === canvasId));
         if (connected.length !== 1) throw new Error("请只连接一个画布，或为 MCP 设置 CANVAS_AGENT_CLIENT_ID");
         return connected[0];
     }
@@ -142,6 +170,7 @@ async function runRpc(session, method, params = {}, generation) {
 
 async function startMcp() {
     const clientId = process.env.CANVAS_AGENT_CLIENT_ID || "";
+    let targetCanvasId = "";
     const source = process.env.CANVAS_AGENT_SOURCE === "codex" ? "codex" : "external";
     const generation = Number(process.env.CANVAS_AGENT_CODEX_GENERATION || 0);
     async function request(path, body, signal) {
@@ -152,7 +181,7 @@ async function startMcp() {
         const response = await fetch(url + path, {
             method: body ? "POST" : "GET",
             headers: { "Content-Type": "application/json", "x-canvas-agent-token": requestToken },
-            body: body ? JSON.stringify({ ...body, clientId, source, generation }) : undefined,
+            body: body ? JSON.stringify({ ...body, clientId, canvasId: targetCanvasId, source, generation }) : undefined,
             signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(95000)]) : AbortSignal.timeout(95000),
         });
         const value = await response.json();
@@ -160,15 +189,25 @@ async function startMcp() {
         return value;
     }
     const server = new Server({ name: "infinite-canvas", version: "0.1.0" }, { capabilities: { tools: { listChanged: true } } });
-    const toolsPath = "/tools?clientId=" + encodeURIComponent(clientId);
+    const toolsPath = () => "/tools?" + new URLSearchParams({ clientId, canvasId: targetCanvasId });
+    const pairingTools = source === "external" && process.env.CANVAS_AGENT_SITE ? [{
+        name: "open_canvas", description: "在本机浏览器打开用户指定的画布并配对。使用已配置站点的 HTTPS /canvas/项目ID 链接。",
+        inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false },
+    }] : [];
     server.setRequestHandler(ListToolsRequestSchema, async () => {
         try {
-            const tools = await request(toolsPath);
-            return { tools: source === "codex" ? tools : tools.filter(({ name }) => name !== "set_agent_state" && name !== "read_skill_file") };
-        } catch { return { tools: [] }; }
+            const tools = await request(toolsPath());
+            return { tools: [...pairingTools, ...(source === "codex" ? tools : tools.filter(({ name }) => !["open_canvas", "set_agent_state", "read_skill_file"].includes(name)))] };
+        } catch { return { tools: pairingTools }; }
     });
     server.setRequestHandler(CallToolRequestSchema, async ({ params }, { signal }) => {
         try {
+            if (params.name === "open_canvas" && pairingTools.length) {
+                targetCanvasId = await pairTrustedCanvas(params.arguments?.url);
+                clearTimeout(retry);
+                void announceTools();
+                return { content: [{ type: "text", text: "已打开画布。若浏览器询问，允许访问本地网络；画布工具将在连接成功后可用。" }] };
+            }
             const result = await request("/tools/call", { name: params.name, arguments: params.arguments || {} }, signal);
             return { isError: result?.ok === false, content: [{ type: "text", text: JSON.stringify(result) }] };
         } catch (error) {
@@ -179,7 +218,7 @@ async function startMcp() {
     let closed = false;
     async function announceTools() {
         try {
-            const tools = await request(toolsPath);
+            const tools = await request(toolsPath());
             if (!tools.length) throw new Error("等待画布连接");
             if (!closed) await server.notification({ method: "notifications/tools/list_changed" });
         } catch {
@@ -196,6 +235,7 @@ function startHttp() {
     app.use((req, res, next) => {
         if (!["127.0.0.1:" + port, "localhost:" + port].includes(req.headers.host)) return res.status(403).json({ error: "无效的本地地址" });
         const origin = req.headers.origin;
+        if (origin && process.env.CANVAS_AGENT_SITE && origin !== process.env.CANVAS_AGENT_SITE) return res.sendStatus(403);
         if (origin) {
             res.setHeader("Access-Control-Allow-Origin", origin);
             res.setHeader("Vary", "Origin");
@@ -205,7 +245,7 @@ function startHttp() {
             res.setHeader("Access-Control-Allow-Private-Network", "true");
         }
         if (req.method === "OPTIONS") return res.sendStatus(204);
-        if (req.method === "GET" && req.path === "/config") return res.json({ url: endpoint, hasToken: Boolean(token) });
+        if (req.method === "GET" && req.path === "/config") return res.json({ url: endpoint, hasToken: Boolean(token), serviceId });
         const credential = req.path === "/events" ? req.query.token : req.headers["x-canvas-agent-token"];
         if (credential !== token) return res.status(401).json({ error: "Token 不正确" });
         if (origin && !origins.has(origin)) {
@@ -274,13 +314,13 @@ function startHttp() {
         res.json({ ok: true });
     });
     app.get("/tools", (req, res) => {
-        const session = findSession(req.query.clientId);
+        const session = findSession(req.query.clientId, req.query.canvasId);
         if (!session.canvasId) throw new Error("请先在网页连接画布");
         res.json(session.tools);
     });
     app.post("/tools/call", async (req, res) => {
         const { clientId, name, arguments: args, source, generation } = req.body;
-        res.json(await callTool(findSession(clientId), name, args, source === "codex" ? "codex" : "external", generation, res));
+        res.json(await callTool(findSession(clientId, req.body.canvasId), name, args, source === "codex" ? "codex" : "external", generation, res));
     });
     app.use((error, req, res, next) => {
         if (res.destroyed) return;
@@ -305,6 +345,6 @@ function startHttp() {
 }
 
 if (mode === "config") console.log(JSON.stringify({ url: endpoint, token, origins: [...origins] }));
-else if (mode === "open") await openCanvas();
+else if (mode === "open") { await openCanvas(process.argv[3], process.argv[4], token, process.argv.slice(5)); console.log("已请求浏览器打开画布"); }
 else if (mode === "mcp") await startMcp();
 else startHttp();

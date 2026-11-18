@@ -137,6 +137,7 @@ export function CanvasAssistantPanel({
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const effectiveConfig = useEffectiveConfig();
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
+    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const cleanupImages = useAssetStore((state) => state.cleanupImages);
     const { message: appMessage } = App.useApp();
     const mode = agentConfig.mode || "api";
@@ -594,12 +595,13 @@ export function CanvasAssistantPanel({
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3" style={{ borderColor: theme.node.stroke }}>
                     <div className="flex items-center gap-2 text-sm font-medium">
                         <Bot className="size-4" />
-                        {view === "history" ? "历史记录" : mode === "codex" ? "Codex" : "创作 Agent"}
-                        <Tooltip title={mode === "codex" ? "切换回创作 Agent" : "切换到 Codex"}>
-                            <Button size="small" className="!h-7 !rounded-md !px-2.5 !shadow-none" style={{ font: "inherit", color: theme.node.text, background: "transparent", borderColor: theme.node.stroke }} icon={<ArrowLeftRight className="size-3.5" />} disabled={isRunning} onClick={switchMode}>{mode === "codex" ? "创作 Agent" : "Codex"}</Button>
+                        {view === "history" ? "历史记录" : mode === "codex" ? "本机 Codex" : "API Agent"}
+                        <Tooltip title={mode === "codex" ? "切换到 OpenAI 兼容 API" : "连接本机 Codex"}>
+                            <Button size="small" className="!h-7 !rounded-md !px-2.5 !shadow-none" style={{ font: "inherit", color: theme.node.text, background: "transparent", borderColor: theme.node.stroke }} icon={<ArrowLeftRight className="size-3.5" />} disabled={isRunning} onClick={switchMode}>{mode === "codex" ? "用 OpenAI API" : "用本机 Codex"}</Button>
                         </Tooltip>
                     </div>
                     <div className="flex items-center gap-1">
+                        {mode === "api" && <Button size="small" type="text" onClick={() => openConfigDialog()}>配置 API</Button>}
                         {mode === "codex" ? <Tooltip title="连接教程"><Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={iconButtonStyle} icon={<PlugZap className="size-4" />} aria-label="连接教程" disabled={isRunning} onClick={() => { setView("connect"); messageListRef.current?.scrollTo({ top: 0 }); }} /></Tooltip> : null}
                         {view === "history" ? (
                             <>

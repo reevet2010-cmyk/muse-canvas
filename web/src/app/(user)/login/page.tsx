@@ -19,8 +19,8 @@ type LoginFormValues = {
 // //host 或 /\host 解析为协议相对的跨站地址，因此先剥离控制字符，再拒绝 // 与 /\ 前缀。
 function safeRedirect(value: string | null): string {
     const cleaned = (value ?? "").replace(/[\t\n\r]/g, "");
-    if (!cleaned.startsWith("/") || cleaned.startsWith("//") || cleaned.startsWith("/\\")) {
-        return "/";
+    if (!cleaned.startsWith("/") || cleaned.startsWith("//") || cleaned.startsWith("/\\") || /^\/(?:[?#]|$)/.test(cleaned)) {
+        return "/canvas";
     }
     return cleaned;
 }
@@ -74,11 +74,10 @@ function LoginContent() {
                 return;
             }
             const action = mode === "register" ? register : login;
-            const user = await action({ username: values.username, password: values.password });
+            await action({ username: values.username, password: values.password });
             message.success(mode === "register" ? "注册成功" : "登录成功");
             router.replace(redirect);
             router.refresh();
-            if (user.role !== "admin") router.replace("/");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "登录失败");
         }

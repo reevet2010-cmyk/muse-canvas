@@ -10,8 +10,8 @@ async function request(token: string, signal: AbortSignal, input?: { label: stri
     return data;
 }
 
-export async function listMuseAccounts(token: string, signal: AbortSignal): Promise<MuseAccountSummary[]> {
-    return (await request(token, signal)).accounts;
+export async function listMuseAccounts(token: string, signal: AbortSignal): Promise<{ importOnly?: boolean; accounts?: MuseAccountSummary[] }> {
+    return request(token, signal);
 }
 
 export function importMuseAccount(token: string, signal: AbortSignal, label: string, session: string): Promise<{ complete: boolean }> {

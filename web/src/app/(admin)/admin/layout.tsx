@@ -53,7 +53,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             return;
         }
         if (user?.role !== "admin") {
-            router.replace("/");
+            router.replace("/canvas");
         }
     }, [isReady, router, token, user?.role]);
 

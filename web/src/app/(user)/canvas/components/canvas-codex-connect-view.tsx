@@ -32,9 +32,11 @@ export function CanvasCodexConnectView({ agent, onChat }: {
     return (
         <div className="space-y-4">
             <div>
-                <h2 className="text-base font-semibold leading-6">连接本地 Agent</h2>
-                <p className="mt-1 text-xs leading-5" style={{ color: theme.node.muted }}>按使用场景选择一种连接方式。</p>
+                <h2 className="text-base font-semibold leading-6">用本机 Codex 操作此画布</h2>
+                <p className="my-2 text-xs leading-5" style={{ color: theme.node.muted }}>已配置画布 MCP 的电脑：复制下面的指令，粘贴到新的 Codex 对话中。保持打开配对后的画布标签页。</p>
+                <Button onClick={() => copyText("请用 infinite-canvas 的 open_canvas 连接 " + window.location.origin + window.location.pathname + "，然后告诉我有哪些节点。", "画布指令已复制")}>复制给 Codex 的指令</Button>
             </div>
+            <details><summary className="cursor-pointer text-xs">其他电脑的安装方式</summary>
             <div className="space-y-2 px-3 py-2.5">
                 <h3 className="text-sm font-medium">方式一：在 Codex 中使用插件</h3>
                 <p className="text-xs leading-5" style={{ color: theme.node.muted }}>安装本项目的 Infinite Canvas 插件后，让 Codex 打开并连接画布。插件会启动本地 Agent，并自动带入连接信息。</p>
@@ -53,6 +55,7 @@ export function CanvasCodexConnectView({ agent, onChat }: {
                 {commandBlock(startCommand)}
                 <p className="text-xs leading-5" style={{ color: theme.node.muted }}>首次直接连接可粘贴终端中的 Connect token，网页会自动记住；通过插件打开时无需手填。</p>
             </div>
+            </details>
             <div className="rounded-lg border p-3" style={{ borderColor: theme.node.stroke }}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
