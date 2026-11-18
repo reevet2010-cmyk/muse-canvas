@@ -194,6 +194,7 @@ export function CanvasMuseDialog({ source, onClose, onOutput }: {
             </Button>,
         ]}>
             <Space orientation="vertical" size="middle" className="w-full">
+                <a href="/muse-accounts" target="_blank" rel="noopener noreferrer">Muse 账号管理（导入账号）</a>
                 {!authorized && <Alert type="info" showIcon title="请先登录画布管理员账号" />}
                 {source && <Typography.Text type="secondary">参考节点：{source.title}</Typography.Text>}
                 <Radio.Group value={action} onChange={(event) => { setAction(event.target.value); setError(""); }} disabled={busy || hasBatch}>

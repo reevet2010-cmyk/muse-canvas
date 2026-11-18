@@ -43,6 +43,13 @@ export async function POST(request: Request, { params }: Context) {
     try {
         await authorize(request);
         const { action } = await params;
+        if (action === "accounts") {
+            if (!request.headers.get("content-type")?.startsWith("application/json")) throw new StudioError("请使用账号导入表单", 415);
+            if (Number(request.headers.get("content-length")) > 65536) throw new StudioError("账号数据过长", 413);
+            const input = await request.json().catch(() => null);
+            const client = createMuseClient(process.env.MUSE2API_BASE_URL, process.env.MUSE2API_KEY);
+            return Response.json(await client.importAccount(input), { status: 201, headers: NO_STORE });
+        }
         if (action === "compose") {
             const movie = await composeTimeline(request);
             return new Response(new Uint8Array(movie), { headers: { ...NO_STORE, "Content-Type": "video/mp4", "Content-Disposition": 'attachment; filename="timeline.mp4"' } });
@@ -88,6 +95,7 @@ export async function GET(request: Request, { params }: Context) {
         const id = new URL(request.url).searchParams.get("id");
         const client = createMuseClient(process.env.MUSE2API_BASE_URL, process.env.MUSE2API_KEY);
         if (action === "video") return Response.json(await client.videoStatus(id), { headers: NO_STORE });
+        if (action === "accounts") return Response.json({ accounts: await client.accounts() }, { headers: NO_STORE });
         if (action === "media") return mediaResponse(await client.videoContent(id), "video/");
         throw new StudioError("未知操作", 404);
     } catch (error) {

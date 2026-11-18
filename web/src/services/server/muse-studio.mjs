@@ -54,6 +54,30 @@ export function createMuseClient(baseUrl, key, fetcher = fetch) {
     }
 
     return {
+        async accounts() {
+            const result = await (await send("../admin/accounts")).json();
+            if (!Array.isArray(result.accounts)) throw new StudioError("无法读取 Muse 账号列表", 502);
+            return result.accounts.map(account => ({
+                label: String(account.label || "未命名账号").slice(0, 100),
+                enabled: account.enabled !== false,
+                complete: account.essential_ok === true,
+            }));
+        },
+        async importAccount(input) {
+            const session = typeof input?.session === "string" ? input.session.trim() : "";
+            const label = typeof input?.label === "string" ? input.label.trim() : "";
+            if (!session || session.length > 32000 || /[\r\n]/.test(session) || !/^[^;=\s]+=[^;]+/.test(session) || label.length > 100) {
+                throw new StudioError("请粘贴一个账号的单行 Cookie（名称=值；各项用英文分号分隔）");
+            }
+            let result;
+            try {
+                result = await (await send("../admin/accounts", { label, cookie_header: session })).json();
+            } catch {
+                throw new StudioError("Muse 网关未确认导入，请刷新账号列表后再试", 502);
+            }
+            if (result.count !== 1) throw new StudioError("未收到账号导入确认，请刷新列表核对", 502);
+            return { complete: Array.isArray(result.essential_missing) && !result.essential_missing.length };
+        },
         async text(prompt) {
             const data = await (await send("chat/completions", {
                 model: "muse-spark", messages: [{ role: "user", content: prompt }], stream: false,

@@ -7,6 +7,21 @@ import test from "node:test";
 import { createMuseClient } from "../src/services/server/muse-studio.mjs";
 import { splitVideo } from "../src/services/server/video-clips.mjs";
 
+test("account import uses the private gateway and only returns account summaries", async () => {
+    const client = createMuseClient("http://gateway.local/v1", "test-key", async (url, init) => {
+        assert.equal(url.pathname, "/admin/accounts");
+        assert.equal(init.headers.Authorization, "Bearer test-key");
+        if (init.method === "POST") {
+            assert.deepEqual(JSON.parse(init.body), { label: "测试", cookie_header: "example=fixture" });
+            return Response.json({ count: 1, essential_missing: ["example2"] });
+        }
+        return Response.json({ accounts: [{ label: "测试", enabled: true, essential_ok: false, cookies: { example: "fixture" }, proxy: "private" }] });
+    });
+    await assert.rejects(client.importAccount({ session: "" }), /单行 Cookie/);
+    assert.deepEqual(await client.importAccount({ session: "example=fixture", label: "测试" }), { complete: false });
+    assert.deepEqual(await client.accounts(), [{ label: "测试", enabled: true, complete: false }]);
+});
+
 test("Muse request forwards a ten-second reference, and downloads the completed clip through the fixed gateway", async () => {
     const seen = [];
     const client = createMuseClient("http://muse.internal/v1", "fixture-key", async (url, request) => {
