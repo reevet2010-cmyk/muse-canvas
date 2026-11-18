@@ -38,7 +38,10 @@ import { fetchSystemAgentSkillFile } from "@/services/api/agent-skills";
 import { imageToDataUrl } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useAgentSkillStore } from "@/stores/use-agent-skill-store";
-import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { useUserStore } from "@/stores/use-user-store";
+import { normalizeAgentLoopbackUrl, type AgentLoopbackSettings } from "@/services/api/agent-loopback";
+import { CanvasAgentLoopbackDialog } from "./canvas-agent-loopback-dialog";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { createCanvasAgentState, runCanvasAgent } from "../agent/canvas-agent-runtime";
 import { useCodexAgent } from "../agent/use-codex-agent";
@@ -141,6 +144,30 @@ export function CanvasAssistantPanel({
     const cleanupImages = useAssetStore((state) => state.cleanupImages);
     const { message: appMessage } = App.useApp();
     const mode = agentConfig.mode || "api";
+    const loopbackOwner = useUserStore(state => state.isReady ? (state.user?.id || "guest") : undefined);
+    const [loopbackSaved, setLoopbackSaved] = useState<{ owner?: string; settings?: AgentLoopbackSettings }>({});
+    const [loopbackOpen, setLoopbackOpen] = useState(false);
+    const loopback = loopbackOwner === loopbackSaved.owner ? loopbackSaved.settings : undefined;
+    useEffect(() => {
+        if (!loopbackOwner || !window.isSecureContext) return;
+        try {
+            const saved = JSON.parse(localStorage.getItem("muse-canvas:agent-loopback:" + loopbackOwner) || "null");
+            if (typeof saved?.baseUrl === "string" && typeof saved.apiKey === "string" && typeof saved.model === "string" &&
+                (saved.protocol === "responses" || saved.protocol === "chat")) {
+                setLoopbackSaved({ owner: loopbackOwner, settings: { ...saved, baseUrl: normalizeAgentLoopbackUrl(saved.baseUrl) } });
+            } else setLoopbackSaved({ owner: loopbackOwner });
+        } catch {
+            setLoopbackSaved({ owner: loopbackOwner });
+        }
+    }, [loopbackOwner]);
+    function saveLoopback(settings?: AgentLoopbackSettings) {
+        if (!loopbackOwner) return;
+        const key = "muse-canvas:agent-loopback:" + loopbackOwner;
+        if (settings) localStorage.setItem(key, JSON.stringify(settings));
+        else localStorage.removeItem(key);
+        setLoopbackSaved({ owner: loopbackOwner, settings });
+        setLoopbackOpen(false);
+    }
     const abortRef = useRef<AbortController | null>(null);
     const consumedInitialRequestRef = useRef<typeof initialRequest>(null);
     const pendingDeleteRef = useRef<PendingDeleteConfirmation | null>(null);
@@ -447,7 +474,7 @@ export function CanvasAssistantPanel({
         setSelectedSkills([]);
         setRemovedReferenceIds(new Set(selectedNodeIds));
 
-        const requestConfig = {
+        const requestConfig: AiConfig & { textReasoningEnabled: boolean; textStreaming: boolean } = {
             ...effectiveConfig,
             model: effectiveConfig.textModel || effectiveConfig.model,
             apiMode: agentConfig.textApiMode,
@@ -456,6 +483,20 @@ export function CanvasAssistantPanel({
             activeChannelId: effectiveConfig.textChannelId || effectiveConfig.activeChannelId,
             textChannelId: effectiveConfig.textChannelId,
         };
+        if (mode === "api" && loopback) {
+            const { baseUrl, apiKey, model, protocol } = loopback;
+            Object.assign(requestConfig, {
+                agentLoopback: true,
+                channelMode: "local",
+                baseUrl, apiKey, model,
+                textModel: model,
+                textChannelId: "agent-loopback",
+                activeChannelId: "agent-loopback",
+                localChannels: [{ id: "agent-loopback", name: "本机 API", protocol: "openai", baseUrl, apiKey, models: [model] }],
+                apiMode: protocol,
+                textStreaming: protocol === "responses" || requestConfig.textStreaming,
+            });
+        }
         const jsonToolFallbackKey = [requestConfig.apiMode || "chat", requestConfig.textChannelId || requestConfig.activeChannelId || requestConfig.baseUrl, requestConfig.model].join("|");
         if (mode === "api" && !isAiConfigReady(requestConfig, requestConfig.model)) {
             updateMessage(session.id, assistantId, {
@@ -602,6 +643,7 @@ export function CanvasAssistantPanel({
                     </div>
                     <div className="flex items-center gap-1">
                         {mode === "api" && <Button size="small" type="text" onClick={() => openConfigDialog()}>配置 API</Button>}
+                        {mode === "api" && <Button size="small" type={loopback ? "primary" : "default"} disabled={isRunning || !loopbackOwner} onClick={() => setLoopbackOpen(true)}>本机 API</Button>}
                         {mode === "codex" ? <Tooltip title="连接教程"><Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={iconButtonStyle} icon={<PlugZap className="size-4" />} aria-label="连接教程" disabled={isRunning} onClick={() => { setView("connect"); messageListRef.current?.scrollTo({ top: 0 }); }} /></Tooltip> : null}
                         {view === "history" ? (
                             <>
@@ -704,6 +746,7 @@ export function CanvasAssistantPanel({
                     />
                 ) : null}
 
+                {loopbackOpen && <CanvasAgentLoopbackDialog key={loopbackOwner} current={loopback} onSave={saveLoopback} onClose={() => setLoopbackOpen(false)} />}
                 <Modal
                     title="Agent 设置"
                     open={settingsOpen}

@@ -1,4 +1,5 @@
 import { mimoTextModels } from "@/lib/mimo-tts";
+import { fetchAgentLoopback } from "./agent-loopback";
 import { dataUrlToGeminiInlineData, geminiActionUrl, geminiDirectHeaders, geminiErrorMessage, isGeminiConfig } from "@/lib/gemini";
 import { aiApiUrl, aiHeaders, ImageRequestError, isEventStreamResponse, readJsonServerSentEvents, refreshRemoteUser } from "@/services/api/image";
 import { imageToDataUrl } from "@/services/image-storage";
@@ -98,6 +99,13 @@ class CanvasAgentRequestError extends Error {
 
 type CanvasAgentAiConfig = AiConfig & { textReasoningEnabled?: boolean; textStreaming?: boolean };
 
+function sendCanvasAgentRequest(config: CanvasAgentAiConfig, path: "/chat/completions" | "/responses", body: object, signal?: AbortSignal) {
+    if (config.agentLoopback) return fetchAgentLoopback(config.baseUrl, config.apiKey, path, body, signal);
+    return fetch(aiApiUrl(config, path), {
+        method: "POST", headers: aiHeaders(config, "application/json"), body: JSON.stringify(body), signal,
+    });
+}
+
 function applyCanvasAgentReasoning(body: Record<string, unknown>, config: CanvasAgentAiConfig, mode: "chat" | "responses" | "gemini") {
     if (!config.textReasoningEnabled) return;
     if (mode === "responses") body.reasoning = { effort: "high" };
@@ -126,6 +134,9 @@ export async function requestCanvasAgentTurn(input: RequestCanvasAgentTurnInput)
             const message = await requestCompletion(requestConfig, systemPrompt, messages, tools, jsonSchema, input.signal);
             return { ...message, toolMode };
         } catch (error) {
+            if (requestConfig.agentLoopback && requestConfig.apiKey && error instanceof Error) {
+                error.message = error.message.replaceAll(requestConfig.apiKey, "[API Key]");
+            }
             requestError = error;
             if (isCanvasAgentContextLimitError(error)) throw error;
             if (hasImageContent(messages) && isImageCompatibilityError(error)) {
@@ -189,12 +200,7 @@ async function requestCompletion(config: CanvasAgentAiConfig, systemPrompt: stri
     if (jsonSchema) body.response_format = { type: "json_schema", json_schema: { name: "canvas_agent_actions", schema: jsonSchema } };
     applyCanvasAgentReasoning(body, config, "chat");
 
-    const response = await fetch(aiApiUrl(config, "/chat/completions"), {
-        method: "POST",
-        headers: aiHeaders(config, "application/json"),
-        body: JSON.stringify(body),
-        signal,
-    });
+    const response = await sendCanvasAgentRequest(config, "/chat/completions", body, signal);
     let payload: ChatCompletionPayload;
     let rawText = "";
     if (config.textStreaming && response.ok && isEventStreamResponse(response)) {
@@ -257,7 +263,7 @@ async function requestCompletion(config: CanvasAgentAiConfig, systemPrompt: stri
 
     const inputTokens = payload.usage?.prompt_tokens || payload.data?.usage?.prompt_tokens;
     calibrateCanvasAgentTokenEstimate(canvasAgentTokenCalibrationKey(config), { systemPrompt, messages, tools }, inputTokens);
-    refreshRemoteUser(config);
+    if (!config.agentLoopback) refreshRemoteUser(config);
     let toolError: string | undefined;
     const toolCalls = (message.tool_calls || []).flatMap((toolCall, index) => {
         const name = toolCall.function?.name?.trim();
@@ -297,12 +303,7 @@ async function requestResponsesCompletion(config: CanvasAgentAiConfig, systemPro
     if (jsonSchema) body.text = { format: { type: "json_schema", name: "canvas_agent_actions", schema: jsonSchema } };
     applyCanvasAgentReasoning(body, config, "responses");
 
-    const response = await fetch(aiApiUrl(config, "/responses"), {
-        method: "POST",
-        headers: aiHeaders(config, "application/json"),
-        body: JSON.stringify(body),
-        signal,
-    });
+    const response = await sendCanvasAgentRequest(config, "/responses", body, signal);
     let payload: ResponsesPayload;
     let rawText = "";
     if (config.textStreaming && response.ok && isEventStreamResponse(response)) {
@@ -351,7 +352,7 @@ async function requestResponsesCompletion(config: CanvasAgentAiConfig, systemPro
     });
     const inputTokens = result.usage?.input_tokens;
     calibrateCanvasAgentTokenEstimate(canvasAgentTokenCalibrationKey(config), { systemPrompt, messages, tools }, inputTokens);
-    refreshRemoteUser(config);
+    if (!config.agentLoopback) refreshRemoteUser(config);
     return {
         content: typeof result.output_text === "string" ? result.output_text : output.flatMap((item) => item.type === "message" ? item.content || [] : []).map((item) => item.type === "output_text" && typeof item.text === "string" ? item.text : "").join(""),
         responseItems,

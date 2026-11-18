@@ -21,6 +21,8 @@
 
 画布 Agent 的「配置 API」打开渠道与模型配置。使用自己的 OpenAI 或兼容服务时填写 Base URL、API Key 和可用文本模型，在 Agent 设置中选择 Chat Completions 或 Responses。
 
+服务只监听自己电脑时，在 HTTPS 画布打开「Agent → 本机 API」，填入本机地址和 API Key，点击「读取模型」或手填模型 ID，再点击「保存并使用」。Codex 网关通常使用 Responses。浏览器如提示访问本地网络，允许当前画布站点即可。这组配置保存在当前浏览器的画布账号下，用于 Agent 对话，可在同一窗口改用全局模型。
+
 要从本机 Codex 操作画布，在本地克隆本项目，进入 `canvas-agent` 后用 Node.js 22 或更高版本运行 `npm install`。使用实际的 HTTPS 站点源（包括端口）及本地绝对路径注册：
 
 ```sh
