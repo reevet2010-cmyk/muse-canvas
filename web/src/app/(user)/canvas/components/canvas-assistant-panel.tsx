@@ -40,8 +40,8 @@ import { imageToDataUrl } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useAgentSkillStore } from "@/stores/use-agent-skill-store";
 import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
-import { useUserStore } from "@/stores/use-user-store";
-import { normalizeAgentLoopbackUrl, type AgentLoopbackSettings } from "@/services/api/agent-loopback";
+import type { AgentLoopbackSettings } from "@/services/api/agent-loopback";
+import { saveAgentLoopbackSettings, useAgentLoopbackSettings } from "@/stores/use-agent-loopback-settings";
 import { CanvasAgentLoopbackDialog } from "./canvas-agent-loopback-dialog";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { createCanvasAgentState, runCanvasAgent } from "../agent/canvas-agent-runtime";
@@ -145,28 +145,11 @@ export function CanvasAssistantPanel({
     const cleanupImages = useAssetStore((state) => state.cleanupImages);
     const { message: appMessage } = App.useApp();
     const mode = agentConfig.mode || "api";
-    const loopbackOwner = useUserStore(state => state.isReady ? (state.user?.id || "guest") : undefined);
-    const [loopbackSaved, setLoopbackSaved] = useState<{ owner?: string; settings?: AgentLoopbackSettings }>({});
+    const { owner: loopbackOwner, settings: loopback } = useAgentLoopbackSettings();
     const [loopbackOpen, setLoopbackOpen] = useState(false);
-    const loopback = loopbackOwner === loopbackSaved.owner ? loopbackSaved.settings : undefined;
-    useEffect(() => {
-        if (!loopbackOwner || !window.isSecureContext) return;
-        try {
-            const saved = JSON.parse(localStorage.getItem("muse-canvas:agent-loopback:" + loopbackOwner) || "null");
-            if (typeof saved?.baseUrl === "string" && typeof saved.apiKey === "string" && typeof saved.model === "string" &&
-                (saved.protocol === "responses" || saved.protocol === "chat")) {
-                setLoopbackSaved({ owner: loopbackOwner, settings: { ...saved, baseUrl: normalizeAgentLoopbackUrl(saved.baseUrl) } });
-            } else setLoopbackSaved({ owner: loopbackOwner });
-        } catch {
-            setLoopbackSaved({ owner: loopbackOwner });
-        }
-    }, [loopbackOwner]);
     function saveLoopback(settings?: AgentLoopbackSettings) {
         if (!loopbackOwner) return;
-        const key = "muse-canvas:agent-loopback:" + loopbackOwner;
-        if (settings) localStorage.setItem(key, JSON.stringify(settings));
-        else localStorage.removeItem(key);
-        setLoopbackSaved({ owner: loopbackOwner, settings });
+        saveAgentLoopbackSettings(loopbackOwner, settings);
         setLoopbackOpen(false);
     }
     const abortRef = useRef<AbortController | null>(null);
@@ -484,7 +467,7 @@ export function CanvasAssistantPanel({
             activeChannelId: effectiveConfig.textChannelId || effectiveConfig.activeChannelId,
             textChannelId: effectiveConfig.textChannelId,
         };
-        if (mode === "api" && loopback) {
+        if (mode === "api" && loopback?.model) {
             const { baseUrl, apiKey, model, protocol } = loopback;
             Object.assign(requestConfig, {
                 agentLoopback: true,

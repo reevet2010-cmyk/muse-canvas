@@ -1,4 +1,5 @@
-export type AgentLoopbackSettings = { baseUrl: string; apiKey: string; model: string; protocol: "responses" | "chat" };
+export const LOOPBACK_IMAGE_CHANNEL_ID = "browser-loopback-image";
+export type AgentLoopbackSettings = { baseUrl: string; apiKey: string; model: string; protocol: "responses" | "chat"; imageModel?: string; useImageByDefault?: boolean };
 
 export function normalizeAgentLoopbackUrl(value: string) {
     const url = URL.parse(value.trim());
@@ -11,14 +12,15 @@ export function normalizeAgentLoopbackUrl(value: string) {
     return url.origin + "/v1";
 }
 
-export async function fetchAgentLoopback(baseUrl: string, apiKey: string, path: "/models" | "/responses" | "/chat/completions", body?: object, signal?: AbortSignal) {
+export async function fetchAgentLoopback(baseUrl: string, apiKey: string, path: "/models" | "/responses" | "/chat/completions" | "/images/generations" | "/images/edits", body?: object, signal?: AbortSignal) {
     if (!window.isSecureContext) throw new Error("请从 HTTPS 画布打开本机 API 设置");
     const url = normalizeAgentLoopbackUrl(baseUrl) + path;
+    const multipart = body instanceof FormData;
     try {
         return await fetch(url, {
             method: body ? "POST" : "GET",
-            headers: { Authorization: "Bearer " + apiKey, ...(body ? { "Content-Type": "application/json" } : {}) },
-            body: body && JSON.stringify(body), signal, redirect: "error", credentials: "omit", cache: "no-store",
+            headers: { Authorization: "Bearer " + apiKey, ...(body && !multipart ? { "Content-Type": "application/json" } : {}) },
+            body: multipart ? body : body && JSON.stringify(body), signal, redirect: "error", credentials: "omit", cache: "no-store",
         });
     } catch (error) {
         if (signal?.aborted) throw error;

@@ -9,6 +9,7 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 - API Agent：配置自己的 OpenAI 或兼容服务后，分别验证 Chat Completions 和 Responses 的真实模型回复。
 - 本机 API：使用自己的回环 API 密钥读取模型并验证真实 Agent 回复。
+- 本机生图：填写本机生图模型 ID，验证实际出图、引用图编辑，以及切回云端生图。
 
 - Muse 账号管理：用自己的 Muse 会话导入账号后，在画布中确认实际生成结果。
 

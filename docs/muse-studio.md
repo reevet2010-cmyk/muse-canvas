@@ -29,6 +29,8 @@
 
 服务只监听自己电脑时，在 HTTPS 画布打开「Agent → 本机 API」，填入本机地址和 API Key，点击「读取模型」或手填模型 ID，再点击「保存并使用」。Codex 网关通常使用 Responses。浏览器如提示访问本地网络，允许当前画布站点即可。这组配置保存在当前浏览器的画布账号下，用于 Agent 对话，可在同一窗口改用全局模型。
 
+本机网关提供 OpenAI Images 接口时，可填写「生图模型 ID」。浏览器会把该模型用于默认生图，也可在全局配置的生图模型列表切回 Muse 或其他渠道。生图和图片编辑分别调用本机的 `/v1/images/generations` 和 `/v1/images/edits`，无需向画布服务器传递 API Key。
+
 要从本机 Codex 操作画布，在本地克隆本项目，进入 `canvas-agent` 后用 Node.js 22 或更高版本运行 `npm install`。使用实际的 HTTPS 站点源（包括端口）及本地绝对路径注册：
 
 ```sh

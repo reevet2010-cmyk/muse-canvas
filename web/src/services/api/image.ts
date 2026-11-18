@@ -2,13 +2,15 @@ import axios from "axios";
 import { executeParameterTranslation, findParameterTranslation, normalizeTranslationAspectRatio, translationBody, translationHeaders, type TranslationInput } from "./channel-parameter-translation";
 
 import { isMiniMaxChannel, miniMaxModels } from "@/lib/minimax-video";
-import { dataUrlToFile } from "@/lib/image-utils";
+import { dataUrlToFile, readFileAsDataUrl } from "@/lib/image-utils";
 import { isKIESeedreamLayerDecompositionModel } from "@/lib/kie-models";
 import { isMimoChannel, mimoModels } from "@/lib/mimo-tts";
 import { modelChannelAttributionHeaders } from "@/lib/model-channel";
 import { dataUrlToGeminiInlineData, geminiActionUrl, geminiDirectHeaders, geminiErrorMessage, isGeminiConfig, normalizeGeminiBaseUrl } from "@/lib/gemini";
 import { autoSyncImage, imageToDataUrl, resolveImageUrl, type UploadedImage } from "@/services/image-storage";
-import { buildApiUrl, channelIdForActiveModel, channelProtocolForConfig, directAIProviderForConfig, localChannelForActiveModel, usesCloudModelChannel, type AiConfig } from "@/stores/use-config-store";
+import { browserImageChannelForConfig, buildApiUrl, channelIdForActiveModel, channelProtocolForConfig, directAIProviderForConfig, localChannelForActiveModel, usesCloudModelChannel, type AiConfig } from "@/stores/use-config-store";
+import { getAgentLoopbackSettings } from "@/stores/use-agent-loopback-settings";
+import { fetchAgentLoopback } from "./agent-loopback";
 import { useUserStore } from "@/stores/use-user-store";
 import { MUSE_IMAGE_MODEL } from "@/lib/muse-models";
 import { fetchAutoDLWorkflows } from "./autodl";
@@ -525,6 +527,7 @@ function withPromptGuard(config: AiConfig, prompt: string) {
 }
 
 function usesAccountProxy(config: AiConfig) {
+    if (browserImageChannelForConfig(config)) return false;
     const token = useUserStore.getState().token;
     return usesCloudModelChannel(config) || Boolean(token);
 }
@@ -955,7 +958,49 @@ async function requestAndParseImages(config: AiConfig, endpoint: string, request
     }
 }
 
+async function requestLoopbackImages(config: AiConfig, prompt: string, references: ReferenceImage[], signal?: AbortSignal) {
+    const settings = getAgentLoopbackSettings();
+    if (!settings || settings.imageModel !== config.model) throw new ImageRequestError("请在 Agent 的「本机 API」中配置这个生图模型");
+    const { n, quality, size, timeoutSeconds } = createImageRequestParams(config);
+    const input = {
+        model: config.model,
+        prompt: withSystemPrompt(config, prompt),
+        n,
+        ...(size ? { size } : {}),
+        ...(quality ? { quality } : {}),
+        ...(/^gpt-image-/i.test(config.model) ? {} : { response_format: "b64_json" }),
+    };
+    let body: object = input;
+    if (references.length) {
+        const form = new FormData();
+        Object.entries(input).forEach(([name, value]) => form.set(name, String(value)));
+        const files = await Promise.all(references.map(async image => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
+        files.forEach(file => form.append("image[]", file));
+        body = form;
+    }
+    const timeout = AbortSignal.timeout(timeoutSeconds * 1000);
+    const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    const response = await fetchAgentLoopback(settings.baseUrl, settings.apiKey, references.length ? "/images/edits" : "/images/generations", body, requestSignal);
+    const payload: ImageApiResponse | null = await response.json().catch(() => null);
+    if (!response.ok || payload?.error?.message || (typeof payload?.code === "number" && payload.code !== 0)) {
+        const message = payload?.error?.message || payload?.msg || `本机生图失败（HTTP ${response.status}）`;
+        throw new ImageRequestError(settings.apiKey ? message.replaceAll(settings.apiKey, "[API Key]") : message);
+    }
+    if (!payload) throw new ImageRequestError("本机生图接口未返回有效的图片数据");
+    return Promise.all(parseImagePayload(payload, IMAGE_MIME).map(async image => {
+        if (image.dataUrl.startsWith("data:")) return image;
+        const url = new URL(image.dataUrl, settings.baseUrl);
+        if (url.origin !== new URL(settings.baseUrl).origin) return image;
+        const download = await fetch(url, { headers: { Authorization: "Bearer " + settings.apiKey }, signal: requestSignal, credentials: "omit", redirect: "error" });
+        if (!download.ok) throw new ImageRequestError(`本机图片下载失败（HTTP ${download.status}）`);
+        const blob = await download.blob();
+        if (!blob.type.startsWith("image/") || !blob.size) throw new ImageRequestError("本机图片下载接口未返回图片");
+        return { ...image, dataUrl: await readFileAsDataUrl(new File([blob], "generated-image", { type: blob.type })) };
+    }));
+}
+
 async function requestImages(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string, references: ReferenceImage[], signal?: AbortSignal): Promise<GeneratedImage[]> {
+    if (browserImageChannelForConfig(config)) return requestLoopbackImages(config, prompt, references, signal);
 	const translation = await findParameterTranslation(config);
 	if (translation) {
 		const input = await imageTranslationInput(config,prompt,references,createImageRequestParams(config));
@@ -1036,7 +1081,7 @@ export async function requestEdit(config: AiConfig & { seedIndex?: number; seedC
 }
 
 export async function createCanvasImageTask(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string, references: ReferenceImage[], options: CanvasImageTaskOptions = {}): Promise<CanvasImageTask> {
-	const translation = await findParameterTranslation(config);
+	const translation = browserImageChannelForConfig(config) ? undefined : await findParameterTranslation(config);
     if (!usesAccountProxy(config)) {
         const images = await requestImages({ ...config, count: "1" }, prompt, references, options.signal);
         options.signal?.throwIfAborted();

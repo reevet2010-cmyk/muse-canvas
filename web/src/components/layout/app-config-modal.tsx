@@ -10,6 +10,8 @@ import { GrokTtsVoiceSelect } from "@/components/grok-tts-voice-select";
 import { MiniMaxTtsVoiceSelect } from "@/components/minimax-tts-voice-select";
 import { ModelPicker } from "@/components/model-picker";
 import { fetchImageModels } from "@/services/api/image";
+import { LOOPBACK_IMAGE_CHANNEL_ID } from "@/services/api/agent-loopback";
+import { saveAgentLoopbackSettings, useAgentLoopbackSettings } from "@/stores/use-agent-loopback-settings";
 import { fetchUserConfig, measureUserStorageProvider, syncUserModelConfig, syncUserStorageProvider } from "@/services/api/user-config";
 import { clearStorageConfigCache as clearFileStorageCache } from "@/services/file-storage";
 import { clearStorageConfigCache as clearImageStorageCache, defaultUserStorageProvider, defaultUserWebDAVStorageProvider, loadStorageConfig, loadUserS3StorageProvider, loadUserWebDAVStorageProvider, saveUserStorageProvider, saveUserWebDAVStorageProvider, type UserStorageProvider } from "@/services/image-storage";
@@ -73,6 +75,7 @@ export function AppConfigModal() {
     const token = useUserStore((state) => state.token);
     const user = useUserStore((state) => state.user);
     const effectiveConfig = useEffectiveConfig();
+    const { owner: loopbackOwner, settings: loopbackSettings } = useAgentLoopbackSettings();
     const modelChannel = publicSettings?.modelChannel;
     const isLoggedIn = Boolean(token && user);
     const canUseRemoteChannel = isLoggedIn && (user?.role === "admin" || modelChannel?.allowUserRemoteChannel === true);
@@ -528,8 +531,13 @@ export function AppConfigModal() {
                         {modelGroups.map((group) => (
                             <Form.Item key={group.modelKey} label={group.defaultLabel} className="mb-4">
                                 <ModelPicker config={modelConfig} value={modelConfig[group.modelKey]} channelId={modelConfig[group.channelKey]} workflowRef={group.workflowKey ? modelConfig[group.workflowKey] : undefined} onWorkflowChange={group.workflowKey ? (ref) => updateConfig(group.workflowKey!, ref) : undefined} onChange={(model, channelId) => {
+                                    if (channelId === LOOPBACK_IMAGE_CHANNEL_ID) return;
                                     updateConfig(group.modelKey, model);
                                     if (channelId) updateConfig(group.channelKey, channelId);
+                                }} onSelectChannel={channelId => {
+                                    if (group.capability === "image" && loopbackOwner && loopbackSettings?.imageModel) {
+                                        saveAgentLoopbackSettings(loopbackOwner, { ...loopbackSettings, useImageByDefault: channelId === LOOPBACK_IMAGE_CHANNEL_ID });
+                                    }
                                 }} capability={group.capability} fullWidth />
                             </Form.Item>
                         ))}

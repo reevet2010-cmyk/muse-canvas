@@ -10,6 +10,8 @@ import type { WorkflowRef, WorkflowSummary } from "@/lib/workflow-channel";
 import { apiGet } from "@/services/api/request";
 import type { AdminPublicSettings } from "@/services/api/admin";
 import { useUserStore } from "@/stores/use-user-store";
+import { useAgentLoopbackSettings } from "@/stores/use-agent-loopback-settings";
+import { LOOPBACK_IMAGE_CHANNEL_ID } from "@/services/api/agent-loopback";
 
 export type LocalModelChannel = {
     id: string;
@@ -33,6 +35,7 @@ export type VideoElementItem = { name: string; description: string; references: 
 export type AiConfig = {
     agentLoopback?: true;
     museCloudAvailable?: boolean;
+    browserImageApi?: { model: string };
     channelMode: "remote" | "local";
     baseUrl: string;
     apiKey: string;
@@ -394,7 +397,8 @@ export function selectableModelsByCapability(config: AiConfig, capability?: Mode
         ...normalizeLocalChannels(config),
         ...publicChannels.filter(channel => config.museCloudAvailable && channel.id === MUSE_CLOUD_CHANNEL_ID),
     ];
-    return filterChannelModelsByCapability(channels, capability, config.models);
+    const models = filterChannelModelsByCapability(channels, capability, config.models);
+    return capability === "image" && config.browserImageApi ? normalizeModelList([...models, config.browserImageApi.model]) : models;
 }
 
 export function resolveModelForCapability(config: AiConfig, currentModel: string | undefined, capability: ModelCapability) {
@@ -409,6 +413,7 @@ export function resolveModelForCapability(config: AiConfig, currentModel: string
 }
 
 function isAiConfigReady(config: AiConfig, model: string) {
+    if (browserImageChannelForConfig({ ...config, model })) return true;
     const channel = localChannelForActiveModel({ ...config, model });
     return Boolean(model.trim()) && (usesCloudModelChannel({ ...config, model }) || Boolean(channel?.baseUrl.trim() && channel?.apiKey.trim()));
 }
@@ -517,8 +522,19 @@ export function useEffectiveConfig() {
     const modelChannel = useConfigStore((state) => state.publicSettings?.modelChannel || null);
     const token = useUserStore((state) => state.token);
     const user = useUserStore((state) => state.user);
+    const { settings: loopback } = useAgentLoopbackSettings();
     const canUseRemoteChannel = Boolean(token && user && (user.role === "admin" || modelChannel?.allowUserRemoteChannel === true));
-    return useMemo(() => resolveEffectiveConfig(config, modelChannel, canUseRemoteChannel), [canUseRemoteChannel, config, modelChannel]);
+    return useMemo(() => {
+        const resolved = resolveEffectiveConfig(config, modelChannel, canUseRemoteChannel);
+        if (!loopback?.imageModel) return resolved;
+        const browserImageApi = { model: loopback.imageModel };
+        return {
+            ...resolved,
+            browserImageApi,
+            models: normalizeModelList([...resolved.models, browserImageApi.model]),
+            ...(loopback.useImageByDefault !== false ? { imageModel: browserImageApi.model, imageChannelId: LOOPBACK_IMAGE_CHANNEL_ID } : {}),
+        };
+    }, [canUseRemoteChannel, config, loopback, modelChannel]);
 }
 
 export function buildApiUrl(baseUrl: string, path: string) {
@@ -574,7 +590,13 @@ export function normalizeLocalChannels(config: Partial<AiConfig>): LocalModelCha
     return normalized;
 }
 
+export function browserImageChannelForConfig(config: AiConfig) {
+    return config.browserImageApi?.model === config.model &&
+        (config.activeChannelId || config.imageChannelId) === LOOPBACK_IMAGE_CHANNEL_ID ? config.browserImageApi : undefined;
+}
+
 export function usesCloudModelChannel(config: AiConfig) {
+    if (browserImageChannelForConfig(config)) return false;
     if (config.channelMode === "remote") return true;
     if (!config.museCloudAvailable || config.agentLoopback ||
         !config.publicChannels.some(channel => channel.id === MUSE_CLOUD_CHANNEL_ID && channel.models?.includes(config.model))) return false;
@@ -585,6 +607,7 @@ export function usesCloudModelChannel(config: AiConfig) {
 }
 
 export function channelIdForActiveModel(config: AiConfig) {
+    if (browserImageChannelForConfig(config)) return LOOPBACK_IMAGE_CHANNEL_ID;
     if (config.channelMode === "local" && usesCloudModelChannel(config)) return MUSE_CLOUD_CHANNEL_ID;
     const channels = (config.channelMode === "remote" ? config.publicChannels : normalizeLocalChannels(config)).filter((channel) => !isWorkflowProtocol(channel.protocol || ""));
     const selectedChannelId = config.model === config.imageModel ? config.imageChannelId : config.model === config.videoModel ? config.videoChannelId : config.model === config.audioModel ? config.audioChannelId : config.model === config.textModel ? config.textChannelId : "";
@@ -613,6 +636,7 @@ export function localChannelForActiveModel(config: AiConfig) {
 }
 
 export function channelProtocolForConfig(config: AiConfig): LocalModelChannel["protocol"] {
+    if (browserImageChannelForConfig(config)) return "openai";
     const channel = usesCloudModelChannel(config)
         ? config.publicChannels.find((item) => item.id === channelIdForActiveModel(config)) || config.publicChannels.find((item) => !isWorkflowProtocol(item.protocol || ""))
         : localChannelForActiveModel(config);

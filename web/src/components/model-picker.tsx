@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/u
 import { useAutoDLWorkflowNames } from "@/hooks/use-autodl-workflow";
 import { isWorkflowProtocol } from "@/lib/model-channel";
 import { MUSE_CLOUD_CHANNEL_ID } from "@/lib/muse-models";
+import { LOOPBACK_IMAGE_CHANNEL_ID } from "@/services/api/agent-loopback";
 import { cn } from "@/lib/utils";
 import type { WorkflowRef } from "@/lib/workflow-channel";
 import { filterModelsByCapability, normalizeLocalChannels, useConfigStore, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
@@ -24,12 +25,13 @@ type ModelPickerProps = {
     fullWidth?: boolean;
     placeholder?: string;
     onMissingConfig?: () => void;
+    onSelectChannel?: (channelId?: string) => void;
 };
 
 type PickerBase = { key: string; channelId?: string; channelName: string; protocol?: string; baseUrl?: string };
 type PickerOption = (PickerBase & { model: string }) | (PickerBase & { model: ""; workflowRef: WorkflowRef; label: string });
 
-export function ModelPicker({ config, value, channelId, capability, onChange, workflowRef, onWorkflowChange, className, fullWidth = false, placeholder = "选择模型", onMissingConfig }: ModelPickerProps) {
+export function ModelPicker({ config, value, channelId, capability, onChange, workflowRef, onWorkflowChange, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, onSelectChannel }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const token = useUserStore((state) => state.token);
@@ -45,7 +47,11 @@ export function ModelPicker({ config, value, channelId, capability, onChange, wo
         if (config.channelMode === "local" && config.museCloudAvailable && token) {
             channels.push(...publicChannels.filter(channel => channel.id === MUSE_CLOUD_CHANNEL_ID));
         }
-        const filtered = channels.filter((channel) => !isWorkflowProtocol(channel.protocol || "")).flatMap((channel) => filterModelsByCapability(channel.models ?? [], capability, channel.protocol || "", channel.modelCapabilities).map((model) => ({ key: `${channel.id}::${model}`, channelId: channel.id, channelName: channel.name, protocol: channel.protocol, baseUrl: channel.baseUrl, model })));
+        const filtered: PickerOption[] = channels.filter((channel) => !isWorkflowProtocol(channel.protocol || "")).flatMap((channel) => filterModelsByCapability(channel.models ?? [], capability, channel.protocol || "", channel.modelCapabilities).map((model) => ({ key: `${channel.id}::${model}`, channelId: channel.id, channelName: channel.name, protocol: channel.protocol, baseUrl: channel.baseUrl, model })));
+        if (capability === "image" && config.browserImageApi) {
+            const model = config.browserImageApi.model;
+            filtered.push({ key: `${LOOPBACK_IMAGE_CHANNEL_ID}::${model}`, channelId: LOOPBACK_IMAGE_CHANNEL_ID, channelName: "本机 API", protocol: "openai", model });
+        }
         if (!workflowEnabled || !token) return filtered;
         const scope = config.channelMode === "remote" ? "system" : "personal";
         return [...filtered, ...channels.flatMap((channel) => isWorkflowProtocol(channel.protocol || "") ? channel.workflows.filter((entry) => entry.enabled && entry.capability === capability && entry.provider === channel.protocol).map((entry) => {
@@ -100,7 +106,7 @@ export function ModelPicker({ config, value, channelId, capability, onChange, wo
                 const option = options.find((item) => item.key === nextValue);
                 if (!option) return;
                 if ("workflowRef" in option) onWorkflowChange?.(option.workflowRef);
-                else { onChange(option.model, option.channelId); if (workflowRef) onWorkflowChange?.(undefined); }
+                else { onChange(option.model, option.channelId); onSelectChannel?.(option.channelId); if (workflowRef) onWorkflowChange?.(undefined); }
             }}
         >
             <SelectTrigger
