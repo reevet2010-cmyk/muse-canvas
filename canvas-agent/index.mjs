@@ -69,8 +69,15 @@ async function pairTrustedCanvas(address) {
         }
         if (!pairingToken) throw new Error("本地 Canvas Agent 未能启动");
     }
-    await openCanvas(target.href, process.env.CANVAS_AGENT_BROWSER || "default", pairingToken);
-    return target.pathname.split("/")[2];
+    const canvasId = target.pathname.split("/")[2];
+    const response = await fetch(endpoint + "/tools?" + new URLSearchParams({ canvasId }), {
+        headers: { "x-canvas-agent-token": pairingToken },
+        signal: AbortSignal.timeout(1500),
+        redirect: "error",
+    });
+    const reused = response.ok;
+    if (!reused) await openCanvas(target.href, process.env.CANVAS_AGENT_BROWSER || "default", pairingToken);
+    return { canvasId, reused };
 }
 
 function saveConfig() {
@@ -203,10 +210,11 @@ async function startMcp() {
     server.setRequestHandler(CallToolRequestSchema, async ({ params }, { signal }) => {
         try {
             if (params.name === "open_canvas" && pairingTools.length) {
-                targetCanvasId = await pairTrustedCanvas(params.arguments?.url);
+                const pairing = await pairTrustedCanvas(params.arguments?.url);
+                targetCanvasId = pairing.canvasId;
                 clearTimeout(retry);
                 void announceTools();
-                return { content: [{ type: "text", text: "已打开画布。若浏览器询问，允许访问本地网络；画布工具将在连接成功后可用。" }] };
+                return { content: [{ type: "text", text: pairing.reused ? "已连接到打开的画布，可使用画布工具。" : "已打开画布。若浏览器询问，允许访问本地网络。画布工具将在连接成功后可用。" }] };
             }
             const result = await request("/tools/call", { name: params.name, arguments: params.arguments || {} }, signal);
             return { isError: result?.ok === false, content: [{ type: "text", text: JSON.stringify(result) }] };
