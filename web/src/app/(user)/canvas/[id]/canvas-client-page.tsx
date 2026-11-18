@@ -68,6 +68,8 @@ import { CanvasNode } from "../components/canvas-node";
 import { CanvasNodePromptPanel, type CanvasNodeGenerationMode, type CanvasVideoFrameOption } from "../components/canvas-node-prompt-panel";
 import type { CanvasVideoResourceOption } from "../components/canvas-video-settings-popover";
 import { CanvasToolbar } from "../components/canvas-toolbar";
+import { CanvasMuseDialog, type MuseOutput, type MuseSource } from "../components/canvas-muse-dialog";
+import { CanvasTimelineDialog, type TimelineShot } from "../components/canvas-timeline-dialog";
 import { AssetPickerModal, type AssetPickerTab } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
 import { CANVAS_ASSET_DRAG_TYPE, CanvasSidePanel } from "../components/canvas-side-panel";
@@ -423,6 +425,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const [maskEditModel, setMaskEditModel] = useState("");
     const [maskEditChannelId, setMaskEditChannelId] = useState("");
     const [splitNodeId, setSplitNodeId] = useState<string | null>(null);
+    const [museDialog, setMuseDialog] = useState<{ source?: MuseSource } | null>(null);
+    const [timeline, setTimeline] = useState<TimelineShot[] | null>(null);
     const [upscaleNodeId, setUpscaleNodeId] = useState<string | null>(null);
     const [superResolveNodeId, setSuperResolveNodeId] = useState<string | null>(null);
     const [angleNodeId, setAngleNodeId] = useState<string | null>(null);
@@ -1977,6 +1981,49 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         }
     }, [message]);
 
+    const appendMuseOutput = useCallback(async (output: MuseOutput, sourceId?: string) => {
+        const center = getCanvasCenter();
+        const source = nodesRef.current.find((node) => node.id === sourceId);
+        const position = source ? { x: source.position.x + source.width + 96, y: source.position.y } : center;
+        const results: CanvasNodeData[] = [];
+        if (output.type === "text") {
+            results.push({
+                ...createCanvasNode(CanvasNodeType.Text, position, { content: output.text, status: NODE_STATUS_SUCCESS }),
+                title: "Muse 脚本",
+            });
+        } else if (output.type === "image") {
+            const image = await uploadImage(output.file);
+            results.push({
+                ...createCanvasNode(CanvasNodeType.Image, position, imageMetadata(image)),
+                ...fitNodeSize(image.width, image.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT),
+                title: "Muse 分镜",
+            });
+        } else {
+            let x = position.x;
+            for (const file of output.files) {
+                const video = await uploadMediaFile(file, "video");
+                const node = buildImportedVideoNode(video, file.name.replace(/\.(mp4|webm)$/i, ""), position);
+                node.position = { x, y: position.y };
+                results.push(node);
+                x += node.width + 64;
+            }
+        }
+        if (!results.length) throw new Error("没有可添加的创作结果");
+        for (const node of results) {
+            while (nodesRef.current.some((item) => item.position.x < node.position.x + node.width
+                && item.position.x + item.width > node.position.x && item.position.y < node.position.y + node.height
+                && item.position.y + item.height > node.position.y)) node.position.y += node.height + 36;
+        }
+        const chain = source && nodesRef.current.some((item) => item.id === source.id) ? [source, ...results] : results;
+        setNodes((prev) => [...prev, ...results]);
+        setConnections((prev) => [...prev, ...chain.slice(1).map((node, index) => ({ id: nanoid(), fromNodeId: chain[index].id, toNodeId: node.id }))]);
+        setSelectedNodeIds(new Set(results.map((node) => node.id)));
+        setSelectedConnectionId(null);
+        setDialogNodeId(results.length === 1 ? results[0].id : null);
+        message.success(results.length === 1 ? "已添加到画布" : `已添加 ${results.length} 个视频片段`);
+        return results[results.length - 1].id;
+    }, [getCanvasCenter, message]);
+
     const createAudioFileNode = useCallback(async (file: File, position: Position) => {
         const hideLoading = message.loading("正在上传音频...", 0);
         try {
@@ -2108,6 +2155,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
             const target = event.target instanceof Element ? event.target : null;
+            if (target?.closest(".ant-modal")) return;
             const targetNodeId = target?.closest<HTMLElement>("[data-node-id]")?.dataset.nodeId;
             const isSelectedVideo = event.target instanceof HTMLVideoElement && Boolean(targetNodeId && selectedNodeIdsRef.current.has(targetNodeId));
             if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || target?.closest("[contenteditable='true']") || (target?.closest("[data-canvas-no-zoom]") && !isSelectedVideo)) return;
@@ -4786,6 +4834,27 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     showImageInfo={showImageInfo}
                     onAddImage={() => createNode(CanvasNodeType.Image)}
                     onAddVideo={() => createNode(CanvasNodeType.Video)}
+                    onOpenTimeline={() => {
+                        const byId = new Map(nodes.map(node => [node.id, node]));
+                        const shots = Array.from(selectedNodeIds).flatMap(id => {
+                            const node = byId.get(id);
+                            if (node?.type !== CanvasNodeType.Video || !(node.metadata?.content || node.metadata?.storageKey)) return [];
+                            return [{ id, title: node.title, content: node.metadata.content || "", storageKey: node.metadata.storageKey }];
+                        });
+                        if (shots.length < 2 || shots.length > 24) {
+                            message.info("请按住 Shift 点选 2–24 个有素材的视频节点");
+                            return;
+                        }
+                        setTimeline(shots);
+                    }}
+                    onOpenMuse={() => {
+                        const node = selectedNodeIds.size === 1 ? nodes.find((item) => selectedNodeIds.has(item.id)) : undefined;
+                        const type = node?.type === CanvasNodeType.Text ? "text" : node?.type === CanvasNodeType.Image ? "image" : node?.type === CanvasNodeType.Video ? "video" : undefined;
+                        const source = node && type && node.metadata?.content
+                            ? { id: node.id, title: node.title, type, content: node.metadata.content, storageKey: node.metadata.storageKey } satisfies MuseSource
+                            : undefined;
+                        setMuseDialog({ source });
+                    }}
                     onAddAudio={() => createNode(CanvasNodeType.Audio)}
                     onAddText={() => createNode(CanvasNodeType.Text)}
                     onAddPanorama={() => createNode(CanvasNodeType.Panorama)}
@@ -4805,6 +4874,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         setAssetPickerOpen(true);
                     }}
                 />
+
+                {museDialog && <CanvasMuseDialog source={museDialog.source} onClose={() => setMuseDialog(null)} onOutput={appendMuseOutput} />}
+                {timeline && <CanvasTimelineDialog selection={timeline} onClose={() => setTimeline(null)} />}
 
                 {isMiniMapOpen ? <Minimap nodes={nodes} viewport={viewport} viewportSize={size} onViewportChange={setViewport} /> : null}
 

@@ -1,5 +1,6 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
+import { Clapperboard, Film } from "lucide-react";
 import { Button, Segmented, Switch } from "antd";
 import { CircleDot, Eraser, Globe2, Grid2x2, Hand, Image as ImageIcon, Info, Layers3, Library, Moon, MousePointer2, Music2, Palette, Redo2, Settings2, Square, Sun, Trash2, Type, Undo2, Upload, Video } from "lucide-react";
 
@@ -16,6 +17,8 @@ export function CanvasToolbar({
     showImageInfo,
     onAddImage,
     onAddVideo,
+    onOpenMuse,
+    onOpenTimeline,
     onAddAudio,
     onAddText,
     onAddPanorama,
@@ -40,6 +43,8 @@ export function CanvasToolbar({
     showImageInfo: boolean;
     onAddImage: () => void;
     onAddVideo: () => void;
+    onOpenMuse: () => void;
+    onOpenTimeline: () => void;
     onAddAudio: () => void;
     onAddText: () => void;
     onAddPanorama: () => void;
@@ -102,6 +107,12 @@ export function CanvasToolbar({
                 </ToolbarButton>
                 <ToolbarButton id="tool-video" label="视频" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddVideo}>
                     <Video className="size-4.5" />
+                </ToolbarButton>
+                <ToolbarButton id="tool-muse" label="Muse 创作" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onOpenMuse}>
+                    <Clapperboard className="size-4.5" />
+                </ToolbarButton>
+                <ToolbarButton id="tool-timeline" label="镜头时间线" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onOpenTimeline}>
+                    <Film className="size-4.5" />
                 </ToolbarButton>
                 <ToolbarButton id="tool-audio" label="音频" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddAudio}>
                     <Music2 className="size-4.5" />
@@ -360,6 +371,8 @@ function toolLabel(id: string) {
     if (id === "tool-text") return "文本";
     if (id === "tool-image") return "图片";
     if (id === "tool-video") return "视频";
+    if (id === "tool-muse") return "Muse 创作";
+    if (id === "tool-timeline") return "镜头时间线";
     if (id === "tool-audio") return "音频";
     if (id === "tool-panorama") return "全景图";
     if (id === "tool-director") return "导演台";

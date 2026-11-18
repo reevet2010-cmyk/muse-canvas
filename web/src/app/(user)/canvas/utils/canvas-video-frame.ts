@@ -55,16 +55,20 @@ async function captureFrameDirect(source: string, position: VideoFramePosition, 
 
 function waitForVideo(video: HTMLVideoElement, eventName: "loadedmetadata" | "loadeddata" | "seeked") {
     return new Promise<void>((resolve, reject) => {
-        const finish = () => {
+        const cleanup = () => {
+            clearTimeout(timeout);
             video.removeEventListener(eventName, finish);
             video.removeEventListener("error", fail);
+        };
+        const finish = () => {
+            cleanup();
             resolve();
         };
         const fail = () => {
-            video.removeEventListener(eventName, finish);
-            video.removeEventListener("error", fail);
-            reject(new Error("Failed to read video frame"));
+            cleanup();
+            reject(new Error("无法读取视频帧，请检查视频是否能播放"));
         };
+        const timeout = setTimeout(fail, 15_000);
         video.addEventListener(eventName, finish);
         video.addEventListener("error", fail);
     });

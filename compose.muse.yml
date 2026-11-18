@@ -1,0 +1,35 @@
+services:
+  canvas:
+    build: .
+    environment:
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请设置 ADMIN_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?请设置 JWT_SECRET}
+      DATABASE_DSN: /app/data/infinite-canvas.db
+      MUSE2API_BASE_URL: http://muse2api:18610/v1
+      MUSE2API_KEY: ${MUSE2API_KEY:?请设置 MUSE2API_KEY}
+    volumes:
+      - canvas-data:/app/data
+    ports:
+      - "127.0.0.1:3210:3000"
+    restart: unless-stopped
+
+  muse2api:
+    build:
+      context: https://github.com/czg86389-hub/muse2api.git#19db32a3d6ef50dc87567a8ee0e35dd50c8f7837
+      args:
+        BUILD_SHA: 19db32a3d6ef50dc87567a8ee0e35dd50c8f7837
+    environment:
+      MUSE2API_KEY: ${MUSE2API_KEY:?请设置 MUSE2API_KEY}
+      MUSE2API_CONCURRENCY: "1"
+      MUSE2API_MANAGED_DEPLOYMENT: "1"
+    volumes:
+      - muse-data:/app/data
+    ports:
+      - "127.0.0.1:18610:18610"
+    shm_size: 1gb
+    restart: unless-stopped
+
+volumes:
+  canvas-data:
+  muse-data:

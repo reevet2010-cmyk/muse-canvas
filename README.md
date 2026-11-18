@@ -2,7 +2,11 @@
   <img src="web/public/logo.svg" width="96" alt="infinite-canvas logo">
 </p>
 
-<h1 align="center">无限画布 (infinite-canvas)</h1>
+<h1 align="center">Muse Canvas · 短视频创作画布</h1>
+
+本项目基于 [tigerowo/infinite-canvas v0.8.4](https://github.com/tigerowo/infinite-canvas/tree/v0.8.4)，通过 [muse2api](https://github.com/czg86389-hub/muse2api) 在画布里生成脚本、分镜和视频，支持尾帧续接、拆段复刻，以及将选中的镜头排序并合成为 MP4。
+
+整合版的安装步骤、所需环境变量和使用方法见 [Muse 创作与镜头时间线](docs/muse-studio.md)。下方保留了上游项目说明及其发布链接。
 
 <p align="center">
   <a href="https://github.com/tigerowo/infinite-canvas"><img src="https://img.shields.io/github/stars/tigerowo/infinite-canvas?style=flat-square&logo=github" alt="GitHub stars"></a>
