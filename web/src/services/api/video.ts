@@ -6,6 +6,7 @@ import { BrowserParameterTranslation, findParameterTranslation, normalizeTransla
 import { dataUrlToFile, readFileAsDataUrl } from "@/lib/image-utils";
 import { isMiniMaxH3Config, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Ratio, normalizeMiniMaxH3Resolution } from "@/lib/minimax-video";
 import { modelChannelAttributionHeaders } from "@/lib/model-channel";
+import { MUSE_CLOUD_CHANNEL_ID, MUSE_VIDEO_MODEL } from "@/lib/muse-models";
 import { dataUrlToGeminiInlineData, geminiActionUrl, geminiDirectHeaders, geminiErrorMessage, geminiOperationUrl, isGeminiConfig, isGeminiVideoModel } from "@/lib/gemini";
 import { isGeminiVeo31Model, normalizeGeminiVideoDuration, normalizeGeminiVideoRatio, normalizeGeminiVideoResolution } from "@/lib/gemini-video";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio } from "@/lib/seedance-video";
@@ -337,11 +338,13 @@ function isGrok2APIVideoConfig(config: AiConfig, model: string) {
 
 export async function cacheProtectedVideo(config: AiConfig, model: string, task: VideoResponse, contentRequest?: RequestInit, contentResponse?: Response) {
     const url = task.video_url || task.url || "";
+    const museContent = model === MUSE_VIDEO_MODEL && task.channelId === MUSE_CLOUD_CHANNEL_ID
+        ? `/api/muse-studio/native-media?id=${encodeURIComponent(task.id)}` : "";
     const needsTaskContent = !url && ("object" in task && task.object === "video");
     const needsContentURL = /\/videos\/[^/?]+\/content(?:[?#]|$)/.test(contentRequest ? new URL(url).pathname : url);
-    if (!isCompletedVideoStatus(task.status) || task.storageKey || (!needsTaskContent && !needsContentURL)) return task;
+    if (!isCompletedVideoStatus(task.status) || task.storageKey || (!museContent && !needsTaskContent && !needsContentURL)) return task;
     const taskId = task.task_id || task.id || task.video_id || "";
-    const response = contentResponse ?? await fetch(contentRequest ? url : `${aiApiUrl(config, `/videos/${encodeURIComponent(taskId)}/content`)}?model=${encodeURIComponent(model)}`, contentRequest || { headers: aiHeaders(config) });
+    const response = contentResponse ?? await fetch(museContent || (contentRequest ? url : `${aiApiUrl(config, `/videos/${encodeURIComponent(taskId)}/content`)}?model=${encodeURIComponent(model)}`), contentRequest || { headers: aiHeaders(config) });
     if (!response.ok) throw new VideoRequestError(`视频内容下载失败：${response.status}`, task);
     const blob = await response.blob();
     const translatedContent = task.parameter_translation && !url;
@@ -393,6 +396,16 @@ async function createAgnesVideoV25RequestBody(config: AiConfig, model: string, p
 }
 
 async function createVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
+    if (model === MUSE_VIDEO_MODEL) {
+        const aspectRatio = normalizeSeedanceRatio(config.size);
+        const refs = input.firstFrame ? [input.firstFrame, ...input.references] : input.references;
+        return {
+            model, prompt,
+            duration: Number(normalizeVideoSecondsForModel(model, config.videoSeconds)),
+            size: aspectRatio === "adaptive" ? "9:16" : aspectRatio,
+            images: await Promise.all(refs.map(async reference => ({ url: await imageToDataUrl(reference) }))),
+        };
+    }
     if (videoChannelProtocol(config, model) === "autodl") {
         const capabilities = getAutoDLCapabilities(await fetchAutoDLWorkflow(autoDLBaseUrl(config, model), model));
         if (!capabilities) throw new VideoRequestError("当前 AutoDL 工作流尚未适配");

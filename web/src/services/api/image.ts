@@ -10,6 +10,7 @@ import { dataUrlToGeminiInlineData, geminiActionUrl, geminiDirectHeaders, gemini
 import { autoSyncImage, imageToDataUrl, resolveImageUrl, type UploadedImage } from "@/services/image-storage";
 import { buildApiUrl, channelIdForActiveModel, channelProtocolForConfig, directAIProviderForConfig, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { MUSE_IMAGE_MODEL } from "@/lib/muse-models";
 import { fetchAutoDLWorkflows } from "./autodl";
 import { tokenDanceRecoveryMessage } from "./protocols/tokendance";
 import type { ReferenceImage } from "@/types/image";
@@ -232,7 +233,7 @@ function applyImageGenerationParams(body: Record<string, unknown>, config: AiCon
 function applyImageGenerationOptions(body: Record<string, unknown>, config: AiConfig, params: ImageRequestParams) {
     if (isZhipuImageModel(config.model)) return;
     if (params.n > 1) body.n = params.n;
-    if (config.responseFormatB64Json) body.response_format = "b64_json";
+    if (config.responseFormatB64Json || config.model === MUSE_IMAGE_MODEL) body.response_format = "b64_json";
     if (config.streamImages) {
         body.stream = true;
         body.partial_images = params.streamPartialImages;
@@ -784,7 +785,7 @@ async function requestImageEditSingle(config: AiConfig, prompt: string, referenc
     if (params.n > 1) formData.set("n", String(params.n));
     if (params.size) formData.set("size", params.size);
     if (params.quality && !config.codexCli) formData.set("quality", params.quality);
-    if (config.responseFormatB64Json) formData.set("response_format", "b64_json");
+    if (config.responseFormatB64Json || config.model === MUSE_IMAGE_MODEL) formData.set("response_format", "b64_json");
     if (config.streamImages) {
         formData.set("stream", "true");
         formData.set("partial_images", String(params.streamPartialImages));
@@ -1167,7 +1168,7 @@ async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: num
         formData.set("prompt", withPromptGuard(config, withSystemPrompt(config, prompt)));
         if (params.n > 1) formData.set("n", String(params.n));
         if (params.quality && !config.codexCli) formData.set("quality", params.quality);
-        if (config.responseFormatB64Json) formData.set("response_format", "b64_json");
+        if (config.responseFormatB64Json || config.model === MUSE_IMAGE_MODEL) formData.set("response_format", "b64_json");
         if (config.streamImages) {
             formData.set("stream", "true");
             formData.set("partial_images", String(params.streamPartialImages));

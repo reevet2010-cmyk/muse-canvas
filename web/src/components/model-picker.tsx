@@ -6,6 +6,7 @@ import { Cpu } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { useAutoDLWorkflowNames } from "@/hooks/use-autodl-workflow";
 import { isWorkflowProtocol } from "@/lib/model-channel";
+import { MUSE_CLOUD_CHANNEL_ID } from "@/lib/muse-models";
 import { cn } from "@/lib/utils";
 import type { WorkflowRef } from "@/lib/workflow-channel";
 import { filterModelsByCapability, normalizeLocalChannels, useConfigStore, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
@@ -23,12 +24,14 @@ type ModelPickerProps = {
     fullWidth?: boolean;
     placeholder?: string;
     onMissingConfig?: () => void;
+    includeCloudMuse?: boolean;
+    onSelectChannel?: (channelId?: string) => void;
 };
 
 type PickerBase = { key: string; channelId?: string; channelName: string; protocol?: string; baseUrl?: string };
 type PickerOption = (PickerBase & { model: string }) | (PickerBase & { model: ""; workflowRef: WorkflowRef; label: string });
 
-export function ModelPicker({ config, value, channelId, capability, onChange, workflowRef, onWorkflowChange, className, fullWidth = false, placeholder = "选择模型", onMissingConfig }: ModelPickerProps) {
+export function ModelPicker({ config, value, channelId, capability, onChange, workflowRef, onWorkflowChange, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, includeCloudMuse = false, onSelectChannel }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const token = useUserStore((state) => state.token);
@@ -36,10 +39,14 @@ export function ModelPicker({ config, value, channelId, capability, onChange, wo
     const publicSettings = useConfigStore((state) => state.publicSettings);
     const workflowEnabled = Boolean(onWorkflowChange && capability && capability !== "text");
     const channelOptions = useMemo<PickerOption[]>(() => {
+        const publicChannels = config.publicChannels.map((channel) => ({ id: channel.id, protocol: channel.protocol, name: channel.name || "云端渠道", baseUrl: channel.baseUrl, models: channel.models, modelCapabilities: channel.modelCapabilities, workflows: channel.workflows || [] }));
         const channels =
             config.channelMode === "remote"
-                ? config.publicChannels.map((channel) => ({ id: channel.id, protocol: channel.protocol, name: channel.name || "云端渠道", baseUrl: channel.baseUrl, models: channel.models, modelCapabilities: channel.modelCapabilities, workflows: channel.workflows || [] }))
+                ? publicChannels
                 : normalizeLocalChannels(config).map((channel) => ({ id: channel.id, protocol: channel.protocol, name: channel.name || "本地渠道", baseUrl: channel.baseUrl, models: channel.models, modelCapabilities: channel.modelCapabilities, workflows: channel.workflowSummaries || [] }));
+        if (config.channelMode === "local" && includeCloudMuse && token) {
+            channels.push(...publicChannels.filter(channel => channel.id === MUSE_CLOUD_CHANNEL_ID));
+        }
         const filtered = channels.filter((channel) => !isWorkflowProtocol(channel.protocol || "")).flatMap((channel) => filterModelsByCapability(channel.models ?? [], capability, channel.protocol || "", channel.modelCapabilities).map((model) => ({ key: `${channel.id}::${model}`, channelId: channel.id, channelName: channel.name, protocol: channel.protocol, baseUrl: channel.baseUrl, model })));
         if (!workflowEnabled || !token) return filtered;
         const scope = config.channelMode === "remote" ? "system" : "personal";
@@ -47,7 +54,7 @@ export function ModelPicker({ config, value, channelId, capability, onChange, wo
             const ref: WorkflowRef = { scope, channelId: channel.id || "", kind: entry.kind, workflowId: entry.workflowId };
             return { key: `workflow:${JSON.stringify([ref.scope, ref.channelId, ref.kind, ref.workflowId])}`, channelId: channel.id, channelName: channel.name, protocol: channel.protocol, baseUrl: channel.baseUrl, model: "", workflowRef: ref, label: entry.title || entry.workflowId };
         }) : [])];
-    }, [capability, config, token, workflowEnabled]);
+    }, [capability, config, includeCloudMuse, token, workflowEnabled]);
     const modelLabel = useAutoDLWorkflowNames(channelOptions);
     const currentOption = useMemo<PickerOption | undefined>(() => {
         if (workflowRef && workflowEnabled) return channelOptions.find((item) => "workflowRef" in item && item.key === `workflow:${JSON.stringify([workflowRef.scope, workflowRef.channelId, workflowRef.kind, workflowRef.workflowId])}`);
@@ -95,7 +102,7 @@ export function ModelPicker({ config, value, channelId, capability, onChange, wo
                 const option = options.find((item) => item.key === nextValue);
                 if (!option) return;
                 if ("workflowRef" in option) onWorkflowChange?.(option.workflowRef);
-                else { onChange(option.model, option.channelId); if (workflowRef) onWorkflowChange?.(undefined); }
+                else { onChange(option.model, option.channelId); onSelectChannel?.(option.channelId); if (workflowRef) onWorkflowChange?.(undefined); }
             }}
         >
             <SelectTrigger

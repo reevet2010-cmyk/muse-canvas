@@ -24,6 +24,7 @@ export function normalizeCogVideoX3Duration(value: string) {
 
 export function videoDurationOptionsForModel(modelName: string) {
     const model = modelKey(modelName);
+    if (model === "muse-video") return [5, 6, 8, 10];
     if (model.includes("wan3")) return [-1, ...Array.from({ length: 29 }, (_, index) => index + 2)];
     if (model.includes("sora-2")) return [4, 8, 12, 16, 20];
     if (model.includes("veo3-1") || model.includes("veo-3-1")) return [4, 6, 8];

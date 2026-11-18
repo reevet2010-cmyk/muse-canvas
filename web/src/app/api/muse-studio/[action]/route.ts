@@ -2,6 +2,7 @@ import { zipSync } from "fflate";
 import { createMuseClient, StudioError } from "@/services/server/muse-studio.mjs";
 import { MAX_VIDEO_UPLOAD, splitVideo } from "@/services/server/video-clips.mjs";
 import { composeTimeline } from "@/services/server/video-timeline.mjs";
+import { MUSE_CLOUD_CHANNEL_ID, MUSE_VIDEO_MODEL } from "@/lib/muse-models";
 
 export const runtime = "nodejs";
 export const maxDuration = 360;
@@ -26,6 +27,7 @@ async function authorize(request: Request, action: string) {
         const user = session.data;
         if (user?.role === "admin") return "admin";
         if (action === "accounts" && user?.role === "user" && user.id && user.id === process.env.MUSE_ACCOUNT_IMPORTER_ID) return "importer";
+        if (action === "native-media" && user?.role === "user" && user.id) return "user";
     }
     throw new StudioError(action === "accounts" ? "当前画布账号没有导入权限" : "当前账号没有 Muse 创作权限", 403);
 }
@@ -40,6 +42,22 @@ function mediaResponse(upstream: Response, allowed: string) {
     const type = upstream.headers.get("Content-Type");
     if (!upstream.body || !type?.startsWith(allowed)) throw new StudioError("Muse 返回的媒体格式无效", 502);
     return new Response(upstream.body, { headers: { ...NO_STORE, "Content-Type": type, "X-Content-Type-Options": "nosniff" } });
+}
+
+async function ownedMuseVideoTaskId(request: Request, id: string | null) {
+    if (!id || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new StudioError("视频任务 ID 无效");
+    const base = (process.env.API_BASE_URL || "http://127.0.0.1:8080").replace(/\/+$/, "");
+    const response = await fetch(`${base}/api/v1/videos/${encodeURIComponent(id)}`, {
+        headers: { Authorization: request.headers.get("authorization")! },
+        signal: AbortSignal.timeout(5000), redirect: "error", cache: "no-store",
+    });
+    const result = await response.json().catch(() => null);
+    const task = result?.data;
+    if (!response.ok || result?.code !== 0 || task?.id !== id || task.model !== MUSE_VIDEO_MODEL ||
+        task.channelId !== MUSE_CLOUD_CHANNEL_ID || !task.task_id || task.task_id === id) {
+        throw new StudioError("找不到当前账号的 Muse 视频任务", 404);
+    }
+    return task.task_id as string;
 }
 
 export async function POST(request: Request, { params }: Context) {
@@ -98,6 +116,7 @@ export async function GET(request: Request, { params }: Context) {
         if (action === "accounts" && access === "importer") return Response.json({ importOnly: true }, { headers: NO_STORE });
         const id = new URL(request.url).searchParams.get("id");
         const client = createMuseClient(process.env.MUSE2API_BASE_URL, process.env.MUSE2API_KEY);
+        if (action === "native-media") return mediaResponse(await client.videoContent(await ownedMuseVideoTaskId(request, id)), "video/");
         if (action === "video") return Response.json(await client.videoStatus(id), { headers: NO_STORE });
         if (action === "accounts") return Response.json({ accounts: await client.accounts() }, { headers: NO_STORE });
         if (action === "media") return mediaResponse(await client.videoContent(id), "video/");

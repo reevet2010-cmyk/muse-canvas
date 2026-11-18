@@ -33,6 +33,7 @@ import remarkGfm from "remark-gfm";
 import { ImageGenerationPending } from "@/components/image-generation-pending";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { MUSE_TEXT_MODEL } from "@/lib/muse-models";
 import { cn } from "@/lib/utils";
 import { fetchSystemAgentSkillFile } from "@/services/api/agent-skills";
 import { imageToDataUrl } from "@/services/image-storage";
@@ -534,7 +535,9 @@ export function CanvasAssistantPanel({
                 references: modelReferences,
                 activeSkillContents,
                 contextCheckpoint: session.contextCheckpoint,
-                preferredJsonMode: session.jsonToolFallbackKey === jsonToolFallbackKey ? session.jsonToolFallbackMode || "structured-json" : undefined,
+                preferredJsonMode: !requestConfig.agentLoopback && requestConfig.model === MUSE_TEXT_MODEL
+                    ? "prompt-json"
+                    : session.jsonToolFallbackKey === jsonToolFallbackKey ? session.jsonToolFallbackMode || "structured-json" : undefined,
                 getContext: getAgentContext,
                 executeAction: (action, signal = controller.signal) => executeCanvasTool(action, messageReferenceNodeIds, activeSkills, mode, signal),
                 signal: controller.signal,
