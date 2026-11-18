@@ -134,24 +134,30 @@ export async function requestCanvasAgentTurn(input: RequestCanvasAgentTurnInput)
             const message = await requestCompletion(requestConfig, systemPrompt, messages, tools, jsonSchema, input.signal);
             return { ...message, toolMode };
         } catch (error) {
+            let reason = error;
             if (requestConfig.agentLoopback && requestConfig.apiKey && error instanceof Error) {
-                error.message = error.message.replaceAll(requestConfig.apiKey, "[API Key]");
+                const message = error.message.replaceAll(requestConfig.apiKey, "[API Key]");
+                if (message !== error.message) {
+                    if (error instanceof CanvasAgentRequestError) reason = new CanvasAgentRequestError(message, error.status, error.code);
+                    else if (error instanceof DOMException) reason = new DOMException(message, error.name);
+                    else reason = new Error(message);
+                }
             }
-            requestError = error;
-            if (isCanvasAgentContextLimitError(error)) throw error;
-            if (hasImageContent(messages) && isImageCompatibilityError(error)) {
+            requestError = reason;
+            if (isCanvasAgentContextLimitError(reason)) throw reason;
+            if (hasImageContent(messages) && isImageCompatibilityError(reason)) {
                 messages = stripImageContent(messages);
                 continue;
             }
-            if (toolMode === "native" && isToolCompatibilityError(error, "tools")) {
+            if (toolMode === "native" && isToolCompatibilityError(reason, "tools")) {
                 toolMode = "structured-json";
                 continue;
             }
-            if (toolMode === "structured-json" && isToolCompatibilityError(error, "structured-json")) {
+            if (toolMode === "structured-json" && isToolCompatibilityError(reason, "structured-json")) {
                 toolMode = "prompt-json";
                 continue;
             }
-            throw error;
+            throw reason;
         }
     }
     throw requestError;

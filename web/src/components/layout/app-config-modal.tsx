@@ -10,7 +10,6 @@ import { GrokTtsVoiceSelect } from "@/components/grok-tts-voice-select";
 import { MiniMaxTtsVoiceSelect } from "@/components/minimax-tts-voice-select";
 import { ModelPicker } from "@/components/model-picker";
 import { fetchImageModels } from "@/services/api/image";
-import { MUSE_CLOUD_CHANNEL_ID } from "@/lib/muse-models";
 import { fetchUserConfig, measureUserStorageProvider, syncUserModelConfig, syncUserStorageProvider } from "@/services/api/user-config";
 import { clearStorageConfigCache as clearFileStorageCache } from "@/services/file-storage";
 import { clearStorageConfigCache as clearImageStorageCache, defaultUserStorageProvider, defaultUserWebDAVStorageProvider, loadStorageConfig, loadUserS3StorageProvider, loadUserWebDAVStorageProvider, saveUserStorageProvider, saveUserWebDAVStorageProvider, type UserStorageProvider } from "@/services/image-storage";
@@ -79,8 +78,7 @@ export function AppConfigModal() {
     const canUseRemoteChannel = isLoggedIn && (user?.role === "admin" || modelChannel?.allowUserRemoteChannel === true);
     const allowCustomChannel = isLoggedIn && modelChannel?.allowCustomChannel === true;
     const effectiveMode = canUseRemoteChannel ? (allowCustomChannel ? config.channelMode : "remote") : "local";
-    const localModelConfig: AiConfig = { ...config, channelMode: "local", publicChannels: effectiveConfig.publicChannels };
-    const modelConfig = effectiveMode === "remote" ? effectiveConfig : localModelConfig;
+    const modelConfig: AiConfig = effectiveConfig;
     const canUseUserStorageProvider = allowUserStorageProvider;
     const glmTts = isGlmTtsModel(config.audioModel);
     const audioConfig = { ...modelConfig, model: config.audioModel, audioModel: config.audioModel, activeChannelId: modelConfig.audioChannelId || modelConfig.activeChannelId };
@@ -532,9 +530,7 @@ export function AppConfigModal() {
                                 <ModelPicker config={modelConfig} value={modelConfig[group.modelKey]} channelId={modelConfig[group.channelKey]} workflowRef={group.workflowKey ? modelConfig[group.workflowKey] : undefined} onWorkflowChange={group.workflowKey ? (ref) => updateConfig(group.workflowKey!, ref) : undefined} onChange={(model, channelId) => {
                                     updateConfig(group.modelKey, model);
                                     if (channelId) updateConfig(group.channelKey, channelId);
-                                }} onSelectChannel={channelId => {
-                                    if (channelId === MUSE_CLOUD_CHANNEL_ID) updateConfig("channelMode", "remote");
-                                }} capability={group.capability} fullWidth includeCloudMuse={canUseRemoteChannel} />
+                                }} capability={group.capability} fullWidth />
                             </Form.Item>
                         ))}
                     </div>

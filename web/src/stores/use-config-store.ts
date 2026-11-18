@@ -5,6 +5,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import { directAIProviderForProtocol, isWorkflowProtocol, type DirectAIProvider, type ModelChannelProtocol } from "@/lib/model-channel";
+import { MUSE_CLOUD_CHANNEL_ID, MUSE_IMAGE_MODEL, MUSE_TEXT_MODEL, MUSE_VIDEO_MODEL } from "@/lib/muse-models";
 import type { WorkflowRef, WorkflowSummary } from "@/lib/workflow-channel";
 import { apiGet } from "@/services/api/request";
 import type { AdminPublicSettings } from "@/services/api/admin";
@@ -31,6 +32,7 @@ export type VideoElementItem = { name: string; description: string; references: 
 
 export type AiConfig = {
     agentLoopback?: true;
+    museCloudAvailable?: boolean;
     channelMode: "remote" | "local";
     baseUrl: string;
     apiKey: string;
@@ -200,16 +202,28 @@ type ConfigStore = {
     clearPromptContinue: () => void;
 };
 
-function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSettings["modelChannel"] | null, canUseRemoteChannel: boolean) {
+export function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSettings["modelChannel"] | null, canUseRemoteChannel: boolean) {
     const channelMode = canUseRemoteChannel ? (modelChannel?.allowCustomChannel ? config.channelMode : "remote") : "local";
+    const museChannel = canUseRemoteChannel ? modelChannel?.channels.find(channel => channel.id === MUSE_CLOUD_CHANNEL_ID && channel.enabled) : undefined;
+    const museModels = museChannel?.models || [];
     if (channelMode === "local" || !modelChannel) {
         const localChannels = normalizeLocalChannels(config);
         const modelChannels = localChannels.filter((channel) => !isWorkflowProtocol(channel.protocol));
+        const readyLocalChannels = modelChannels.filter(channel => channel.baseUrl.trim() && channel.apiKey.trim());
+        function modelWithMuseFallback(model: string, capability: ModelCapability, museModel: string) {
+            if (!museModels.includes(museModel) || model === museModel) return model;
+            const localOptions = filterChannelModelsByCapability(readyLocalChannels, capability);
+            return localOptions.includes(model) ? model : localOptions[0] || museModel;
+        }
         return {
             ...config,
             channelMode,
             localChannels,
-            models: normalizeModelList(modelChannels.flatMap((channel) => channel.models)),
+            models: normalizeModelList([...modelChannels.flatMap((channel) => channel.models), ...museModels]),
+            imageModel: modelWithMuseFallback(config.imageModel, "image", MUSE_IMAGE_MODEL),
+            videoModel: modelWithMuseFallback(config.videoModel, "video", MUSE_VIDEO_MODEL),
+            textModel: modelWithMuseFallback(config.textModel, "text", MUSE_TEXT_MODEL),
+            museCloudAvailable: Boolean(museChannel),
             publicChannels: modelChannel?.channels || [],
         };
     }
@@ -226,6 +240,7 @@ function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSetti
     return {
         ...config,
         channelMode,
+        museCloudAvailable: Boolean(museChannel),
         models,
         imageModels,
         videoModels,
@@ -374,7 +389,11 @@ export function filterChannelModelsByCapability(channels: Array<{ protocol?: Loc
 
 export function selectableModelsByCapability(config: AiConfig, capability?: ModelCapability) {
     if (!capability) return config.models;
-    const channels = config.channelMode === "remote" ? config.publicChannels.map((channel) => ({ ...channel, models: channel.models || [] })) : normalizeLocalChannels(config);
+    const publicChannels = config.publicChannels.map((channel) => ({ ...channel, models: channel.models || [] }));
+    const channels = config.channelMode === "remote" ? publicChannels : [
+        ...normalizeLocalChannels(config),
+        ...publicChannels.filter(channel => config.museCloudAvailable && channel.id === MUSE_CLOUD_CHANNEL_ID),
+    ];
     return filterChannelModelsByCapability(channels, capability, config.models);
 }
 
@@ -391,7 +410,7 @@ export function resolveModelForCapability(config: AiConfig, currentModel: string
 
 function isAiConfigReady(config: AiConfig, model: string) {
     const channel = localChannelForActiveModel({ ...config, model });
-    return Boolean(model.trim()) && (config.channelMode === "remote" || Boolean(channel?.baseUrl.trim() && channel?.apiKey.trim()));
+    return Boolean(model.trim()) && (usesCloudModelChannel({ ...config, model }) || Boolean(channel?.baseUrl.trim() && channel?.apiKey.trim()));
 }
 
 export const useConfigStore = create<ConfigStore>()(
@@ -555,7 +574,18 @@ export function normalizeLocalChannels(config: Partial<AiConfig>): LocalModelCha
     return normalized;
 }
 
+export function usesCloudModelChannel(config: AiConfig) {
+    if (config.channelMode === "remote") return true;
+    if (!config.museCloudAvailable || config.agentLoopback ||
+        !config.publicChannels.some(channel => channel.id === MUSE_CLOUD_CHANNEL_ID && channel.models?.includes(config.model))) return false;
+    const selectedChannelId = config.activeChannelId ||
+        (config.model === MUSE_IMAGE_MODEL ? config.imageChannelId : config.model === MUSE_VIDEO_MODEL ? config.videoChannelId : config.textChannelId);
+    return !normalizeLocalChannels(config).some(channel => channel.id === selectedChannelId &&
+        channel.id !== MUSE_CLOUD_CHANNEL_ID && channel.models.includes(config.model) && channel.baseUrl.trim() && channel.apiKey.trim());
+}
+
 export function channelIdForActiveModel(config: AiConfig) {
+    if (config.channelMode === "local" && usesCloudModelChannel(config)) return MUSE_CLOUD_CHANNEL_ID;
     const channels = (config.channelMode === "remote" ? config.publicChannels : normalizeLocalChannels(config)).filter((channel) => !isWorkflowProtocol(channel.protocol || ""));
     const selectedChannelId = config.model === config.imageModel ? config.imageChannelId : config.model === config.videoModel ? config.videoChannelId : config.model === config.audioModel ? config.audioChannelId : config.model === config.textModel ? config.textChannelId : "";
     const selectedChannel = channels.find((channel) => channel.id === selectedChannelId);
@@ -583,7 +613,7 @@ export function localChannelForActiveModel(config: AiConfig) {
 }
 
 export function channelProtocolForConfig(config: AiConfig): LocalModelChannel["protocol"] {
-    const channel = config.channelMode === "remote"
+    const channel = usesCloudModelChannel(config)
         ? config.publicChannels.find((item) => item.id === channelIdForActiveModel(config)) || config.publicChannels.find((item) => !isWorkflowProtocol(item.protocol || ""))
         : localChannelForActiveModel(config);
     return channel?.protocol || "openai";
